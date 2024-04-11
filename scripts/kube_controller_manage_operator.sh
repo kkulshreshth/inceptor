@@ -41,7 +41,7 @@ get_basic_info() {
 }
 
 # Function to check the status of the kube-controller-manager Operator
-check_kube-controller-manager_operator_status() {
+check_kube_controller_manager_operator_status() {
     echo
     echo -e "${YELLOW}Checking kube-controller-manager Operator Status...${RESET}"
     oc get co kube-controller-manager 
@@ -63,7 +63,7 @@ check_operator_resources() {
     echo
 }
 
-check_kube-controller-manager_operator_pod_logs() {
+check_kube_controller_manager_operator_pod_logs() {
     echo
     echo -e "${YELLOW}Gathering kube-controller-manager Operator Pod Logs...${RESET}"
     operator_pod=$(oc -n openshift-kube-controller-manager-operator get pods --no-headers -o custom-columns=":metadata.name" | grep kube-controller-manager-operator)
@@ -87,7 +87,7 @@ check_kube-controller-manager_operator_pod_logs() {
 }
 
 # Checking logs of openshift-kube-controller-manager  pods
-check_openshift-kube-controller-manager_pod_logs() {
+check_openshift_kube_controller_manager_pod_logs() {
     echo
     echo -e "${YELLOW}Gathering logs from one of the openshift-kube-controller-manager  pods...${RESET}"
     
@@ -172,7 +172,7 @@ build_search_string() {
 search_kcs() {
     echo
     if [ "$do_kcs_search" == "false" ]; then
-        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to image-regitry pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/3804741${RESET}"
+        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to openshift-kube-controller-manager pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/3804741${RESET}"
     else
         echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
         api_url="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
@@ -197,7 +197,7 @@ search_kcs() {
 get_prometheus_graph_links() {
     echo
     echo -e "${YELLOW}Running prometheus queries...${RESET}"
-    echo -e "${YELLOW}Please navigate to the following links to review metrics related to the image registry operator:${RESET}"
+    echo -e "${YELLOW}Please navigate to the following links to review metrics related to the openshift-kube-controller-manager operator:${RESET}"
     echo
 
     command_to_run="ocm backplane console $cluster_id"
@@ -219,7 +219,7 @@ get_prometheus_graph_links() {
     echo -e "$query_url"
     echo
     echo -e "${GREEN}2. Query Executed:${RESET} kube_job_status_failed{namespace="openshift-kube-controller-manager"}"
-    echo -e "This query provides information about the ${GREEN}FAILED${RESET} jobs inside the namespace/openshift-image_registry"
+    echo -e "This query provides information about the ${GREEN}FAILED${RESET} jobs inside the namespace/openshift-kube-controller-manager"
     echo
     query="monitoring/query-browser?query0=kube_job_status_failed%7Bnamespace%3D%22openshift-kube-controller-manager%22%7D"
     query_url="$console_url/$query"
@@ -230,10 +230,10 @@ get_prometheus_graph_links() {
 main() {
     login_via_backplane
     get_basic_info
-    check_image_registry_operator_status
+    check_kube_controller_manager_operator_status
     check_operator_resources
-    check_image_registry_operator_pod_logs
-    check_image_registry_pod_logs
+    check_kube_controller_manager_operator_pod_logs
+    check_openshift_kube_controller_manager_pod_logs
     check_other_configuration
     job_pruning_issues
     build_search_string
