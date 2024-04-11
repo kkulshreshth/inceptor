@@ -235,7 +235,6 @@ main() {
     check_kube_controller_manager_operator_pod_logs
     check_openshift_kube_controller_manager_pod_logs
     check_other_configuration
-    job_pruning_issues
     build_search_string
     search_kcs
     get_prometheus_graph_links
