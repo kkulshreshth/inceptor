@@ -7,34 +7,35 @@ BLUE="\033[44m"
 RESET="\033[0m"
 cluster_id=$1
 search_string="cluster%20autoscaler%20operator%20degraded%20in%20OpenShift"
+
 do_kcs_search="true"
 
 
 
-#echo "Enter your username (ex: rhn-support-<kerberos>):"
-#read username
+echo "Enter your username (ex: rhn-support-<kerberos>):"
+read username
 
-#echo "Enter your password:"
-#read -s pass
+echo "Enter your password:"
+read -s pass
 
-#echo
+echo
 
-#login_via_backplane() {
-#    echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
-#    ocm backplane login $cluster_id
-#}
+login_via_backplane() {
+    echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
+    ocm backplane login $cluster_id
+}
 
 get_basic_info() {
-#    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-#    echo -e "${YELLOW}Listing basic information about the cluster...${RESET}"
-#    osdctl cluster context $cluster_id
-#    echo
-#    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-#    echo
-#    echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
-#    osdctl servicelog list $cluster_id
-#    echo
-#    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo -e "${YELLOW}Listing basic information about the cluster...${RESET}"
+    osdctl cluster context $cluster_id
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
+    osdctl servicelog list $cluster_id
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Checking node status...${RESET}"
     oc get nodes
@@ -75,7 +76,6 @@ check_operator_resources() {
 }
 
 
-#################################################
 # Checking Cluster Autoscaler config
 check_cluster_autoscaler_config() {
     echo
@@ -86,7 +86,6 @@ check_cluster_autoscaler_config() {
     echo
 }
 
-#################################################
 
 # Checking Machine Autoscaler config
 check_machine_autoscaler_config() {
@@ -98,7 +97,6 @@ check_machine_autoscaler_config() {
     echo
 }
 
-#################################################
 check_cluster_autoscaler_operator_pod_logs() {
     echo
     echo -e "${YELLOW}Gathering Autoscaler Operator Pod Logs and filtering for known issues.${RESET}"
@@ -149,7 +147,6 @@ check_cluster_autoscaler_default_pod_logs() {
     echo
 }
 
-####################################################
 # Checking logs of machine-api-contoller pods
 check_machine_api_controller_pod_logs() {
     echo
@@ -176,8 +173,6 @@ check_machine_api_controller_pod_logs() {
     echo
 }
 
-########################################################
-
 
 check_other_configuration() {
     echo
@@ -185,50 +180,14 @@ check_other_configuration() {
     oc get events -n openshift-machine-api
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
-    echo -e "${YELLOW}Checking the operator config for image-registry${RESET}"
-    echo -e "${GREEN}oc get configs.imageregistry.operator.openshift.io cluster -o yaml (.status.conditions)${RESET}"
-    echo
-    oc get configs.imageregistry.operator.openshift.io cluster -o yaml | awk '/^\s*conditions:/, /^\s*generations:/{if(/^\s*generations:/) exit; print}'
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-    echo
 
-    echo -e "${YELLOW}Fetching storage configuration${RESET}"
-    echo -e "${GREEN}oc get configs.imageregistry.operator.openshift.io cluster -o json | jq -r '.spec.storage'${RESET}"
-    echo
-    oc get configs.imageregistry.operator.openshift.io cluster -o json | jq -r '.spec.storage'
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-
-    echo
-    echo -e "${YELLOW}Check imagepruner (.status.conditions)${RESET}"
-    echo -e "${GREEN}oc get imagepruner cluster -o yaml (.status.conditions)${RESET}"
-    oc get imagepruner cluster -o yaml | awk '/^\s*conditions:/, /^\s*observedGeneration:/{if(/^\s*observedGeneration:/) exit; print}'
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-    echo
-}
-
-job_pruning_issues() {
-    echo -e "${BLUE}KNOWN ISSUES and SOLUTIONS${RESET}"
-    echo -e "${YELLOW}PRUNING JOB FAILURES${RESET}"
-    echo
-    echo -e "A common cause of the cluster operator to become degraded is through the failure of its periodic pruning jobs."
-    
-    echo -e "${GREEN}Check for any jobs which did not complete, they will show up as '0/1' in the completions column${RESET}"
-    oc get job -n openshift-machine-api
-    echo
-    echo -e "If any job did not complete, check the logs for the pod corresponding to the job for more information about the failure using the following command:"
-    echo -e "${GREEN}oc logs -n openshift-image-registry -l job-name=$JOBNAME${RESET}"
-    echo
-    echo -e "If successive pruning jobs have completed, ask the SRE/customer to remove the failed jobs using the following command:"
-    echo -e "${GREEN}oc delete job -n openshift-image-registry $JOBNAME${RESET}"
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
 }
 
 
-#################################################### need to find out which team manages this operator
 
 print_additional_info() {
     echo -e "${YELLOW}Additional Information:${RESET}"
-    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}forum-imageregistry${RESET} slack channel and ping ${GREEN}@imageregistry-team${RESET} handle with any queries."
+    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}sbr-shift${RESET} slack channel ${GREEN}to handle with any queries."
 }
 
 build_search_string() {
@@ -264,7 +223,7 @@ build_search_string() {
 
         updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
         search_string="$search_string%20$updated_operator_degraded_message"
-        #echo "NEW SEARCH STRINGS: $search_string"
+        echo "NEW SEARCH STRINGS: $search_string"
         echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     fi
 }
@@ -272,7 +231,7 @@ build_search_string() {
 search_kcs() {
     echo
     if [ "$do_kcs_search" == "false" ]; then
-        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to image-regitry pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/6821651${RESET}"
+        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cluster-operator pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/6821651${RESET}"
     else
         echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
         api_url="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
@@ -296,7 +255,7 @@ search_kcs() {
 get_prometheus_graph_links() {
     echo
     echo -e "${YELLOW}Running prometheus queries...${RESET}"
-    echo -e "${YELLOW}Please navigate to the following links to review metrics related to the image registry operator:${RESET}"
+    echo -e "${YELLOW}Please navigate to the following links to review metrics related to the cluater-autoscaler operator:${RESET}"
     echo
 
     command_to_run="ocm backplane console $cluster_id"
@@ -311,16 +270,16 @@ get_prometheus_graph_links() {
 
     console_url=$(grep -o 'http[^\ ]*' $output_file)
 
-    echo -e "${GREEN}1. MONITORING DASHBOARD for namespace/openshift-image-registry: ${RESET}"
-    query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-image-registry&type=deployment"
+    echo -e "${GREEN}1. MONITORING DASHBOARD for namespace/openshift-machine-api: ${RESET}"
+    query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-machine-api&type=deployment"
     echo
     query_url="$console_url/$query"
     echo -e "$query_url"
     echo
-    echo -e "${GREEN}2. Query Executed:${RESET} kube_job_status_failed{namespace="openshift-image-registry"}"
-    echo -e "This query provides information about the ${GREEN}FAILED${RESET} jobs inside the namespace/openshift-image_registry"
+    echo -e "${GREEN}2. Query Executed:${RESET} kube_job_status_failed{namespace="openshift-machine-api"}"
+    echo -e "This query provides information about the ${GREEN}FAILED${RESET} jobs inside the namespace/openshift-machine-api"
     echo
-    query="monitoring/query-browser?query0=kube_job_status_failed%7Bnamespace%3D%22openshift-image-registry%22%7D"
+    query="monitoring/query-browser?query0=kube_job_status_failed%7Bnamespace%3D%22openshift-machine-api%22%7D"
     query_url="$console_url/$query"
     echo -e "$query_url"
     echo
@@ -336,7 +295,6 @@ main() {
     check_cluster_autoscaler_operator_pod_logs
     check_cluster_autoscaler_default_pod_logs
     check_other_configuration
-    job_pruning_issues
     build_search_string
     search_kcs
     get_prometheus_graph_links
