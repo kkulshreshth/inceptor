@@ -6,31 +6,32 @@ YELLOW="\033[33m"
 BLUE="\033[44m"
 RESET="\033[0m"
 cluster_id=$1
-search_string="kube%20controller-manager%20operator%20degraded%20in%20OpenShift"
 do_kcs_search="true"
 
-echo "Enter your username (ex: rhn-support-<kerberos>):"
-read username
+#echo "Enter your username (ex: rhn-support-<kerberos>):"
+#read username
 
-echo "Enter your password:"
-read -s pass
+#echo "Enter your password:"
+#read -s pass
 
-echo
+#echo "Enter the cluster id"
+#read cluster_id
+
 
 login_via_backplane() {
     echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
-    ocm backplane login $cluster_id
+    ocm-backplane login $cluster_id
 }
 
 get_basic_info() {
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo -e "${YELLOW}Listing basic information about the cluster...${RESET}"
-    osdctl cluster context $cluster_id
+    yes | osdctl cluster context $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
-    osdctl servicelog list $cluster_id
+    yes | osdctl servicelog list $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
@@ -56,7 +57,7 @@ check_kube_controller_manager_operator_status() {
 # Checking the deployment and pods for kube-controller-manager
 check_operator_resources() {
     echo
-    echo -e "${YELLOW}Checking the deployment and pods for kube-controller-manager...${RESET}"
+    echo -e "${YELLOW}Checking the resource for kube-controller-manager...${RESET}"
     echo -e "${GREEN}GET ALL:${RESET}"
     oc -n openshift-kube-controller-manager get all
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
@@ -89,11 +90,9 @@ check_kube_controller_manager_operator_pod_logs() {
 # Checking logs of openshift-kube-controller-manager  pods
 check_openshift_kube_controller_manager_pod_logs() {
     echo
-    echo -e "${YELLOW}Gathering logs from one of the openshift-kube-controller-manager  pods...${RESET}"
+    echo -e "${YELLOW}Gathering logs from openshift-kube-controller-manager related pods...${RESET}"
     
     red_flags=("error" "degraded" "timeout" "Terminating" "canceled" "CrashLoopBackOff" "RequestError" "Unavailable" "backoff" "failed" "x509")
-
-    echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
     echo
     log_output=$(for i in $(oc get pods -o name -n openshift-kube-controller-manager) ; do oc --tail 10 logs $i -n openshift-kube-controller-manager | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|CrashLoopBackOff|RequestError|x509' ; done)
     colored_logs="$log_output"
@@ -139,13 +138,13 @@ build_search_string() {
         operator_degraded_message=$(oc get co kube-controller-manager -o json | jq -r '.status.conditions[] | select(.type == "Progressing") | .message')
     fi
 
-    #echo -e "OPERTOR MESSAGE : $operator_degraded_message"
+   # echo -e "OPERTOR MESSAGE : $operator_degraded_message"
 
     if [ "$operator_degraded_message" == "null" ]; then
         do_kcs_search="false"
     else
         # Strings to search for KCS, will add more strings based on defined errors
-        search_pattern=("StaticPodsDegraded: pod/kube-controller-manager" "StaticPodsDegraded")
+        search_pattern=("kube-controller-manager pods" "kube-controller-manager is in state degraded" "kube-controller-manager degraded" "kube-controller-manager CrashLoopBackOff")
 
         # Variable to store the found strings
         found_strings=""
@@ -153,18 +152,19 @@ build_search_string() {
         # Loop through each search string
         for search_str in "${search_pattern[@]}"; do
             # Check if the search string is present in the paragraph
-            if [[ $operator_degraded_message =~ $search_str ]]; then
-                # If found, append it to the variable
+           # echo "search str: $search_str"
+          #  if [[ $operator_degraded_message =~ $search_str ]]; then
+          #      # If found, append it to the variable
                 found_strings="$found_strings $search_str"
-            fi
+          #  fi
         done
 
         # Print the result
-        #echo "Found strings: $found_strings"
+       # echo "Found strings: $found_strings"
 
         updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
         search_string="$search_string%20$updated_operator_degraded_message"
-        #echo "NEW SEARCH STRINGS: $search_string"
+      #  echo "NEW SEARCH STRINGS: $search_string"
         echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     fi
 }
@@ -213,7 +213,7 @@ get_prometheus_graph_links() {
     console_url=$(grep -o 'http[^\ ]*' $output_file)
 
     echo -e "${GREEN}1. MONITORING DASHBOARD for namespace/openshift-kube-controller-manager: ${RESET}"
-    query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-kube-controller-manager&type=pod"
+    query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-kube-controller-manager-operator&type=deployment"
     echo
     query_url="$console_url/$query"
     echo -e "$query_url"
