@@ -187,7 +187,7 @@ check_other_configuration() {
 
 print_additional_info() {
     echo -e "${YELLOW}Additional Information:${RESET}"
-    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}sbr-shift${RESET} slack channel ${GREEN}to handle with any queries."
+    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}forum-cloud${RESET} slack channel ${GREEN}to handle with any queries."
 }
 
 build_search_string() {
