@@ -18,12 +18,12 @@ do_kcs_search="true"
 
 # Prompt the user to enter their username
 # Read the input from the user and store it in the variable 'username'
-echo -n "Enter your username (ex: rhn-support-<kerberos>):"
+echo -n "Enter your username (ex: rhn-support-<kerberos>): "
 read username
 
 # Prompt the user to enter their password (with the '-s' flag to silence input)
 # Read the input from the user without echoing it to the terminal (for password input)
-echo -n "Enter your password:"
+echo -n "Enter your password: "
 read -s pass
 
 # Echo an empty line for visual separation or formatting purposes
