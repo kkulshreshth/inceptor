@@ -7,6 +7,11 @@ Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for op
 - ocm backplane CLI
 - osdctl CLI
 
+# How to get inceptor CLI binary?
+1. Navigate to https://github.com/kkulshreshth/inceptor/tree/main/inceptor-cli and download the inceptor binary file.
+2. Place the binary in /usr/local/bin/ in your system.
+3. Verify using ```inceptor --version```
+
 # Usage:
 Current version: 0.1.0
 The current version contains the following commands/sub-commands:
