@@ -1,0 +1,49 @@
+name: incpetor
+help: CLI to troubleshoot ROSA/OSD clusters
+version: 0.1.0
+
+commands:
+- name: check
+  alias: c
+  help: troubleshoot operators
+
+  commands:
+  - name: image-registry
+    alias: ir
+    help: check image-registry operator
+
+    args:
+    - name: clusterid
+      required: true
+      help: External ID of the ROSA/OSD cluster
+  
+  - name: authentication
+    alias: auth
+    help: check authentication operator
+
+    args:
+    - name: clusterid
+      required: true
+      help: External ID of the ROSA/OSD cluster  
+
+  - name: cloud-credential
+    alias: cc
+    help: check cloud-credential operator
+
+    args:
+    - name: clusterid
+      required: true
+      help: External ID of the ROSA/OSD cluster
+
+  - name: cluster-health
+    alias: ch
+    help: check cluster health
+
+    args:
+    - name: clusterid
+      required: true
+      help: External ID of the ROSA/OSD cluster
+
+
+  examples:
+  - inceptor check image-registry cluster-id
