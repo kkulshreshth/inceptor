@@ -1,7 +1,7 @@
 # Inceptor: Streamlined ROSA/OSD Cluster Troubleshooting
 
 # Description:
-Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for operators within Openshift clusters. With a single command, Inceptor aggregates crucial information including resources, logs, events, support status, service logs, and Prometheus graph links. By consolidating these essential details into one accessible interface, Inceptor empowers operators to efficiently diagnose and resolve issues, promoting smoother operation and enhanced performance within Openshift environments.
+Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for operators within ROSA/OSD clusters. With a single command, Inceptor aggregates crucial information including resources, logs, events, support status, service logs, suggested KCS solutions and Prometheus graph links. By consolidating these essential details into one accessible interface, Inceptor empowers operators to efficiently diagnose and resolve issues, promoting smoother operation and enhanced performance within Openshift environments.
 
 # Prerequisite:
 - ocm backplane CLI
