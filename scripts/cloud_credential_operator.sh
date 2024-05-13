@@ -79,6 +79,153 @@ get_basic_info() {
   oc get nodes
 }
 
+# Additional Information
+print_additional_info() {
+  inc_separator
+  inc_title "Additional Information :"
+  echo -e "To get in touch with OCP engineering for this operator, join ${GRN}$1${NC} slack channel for any inquiries."
+}
+
+ # Prometheus link --- 
+ # For supported operators
+get_prometheus_graph_links() {
+  local prom_namespace
+  local promql_rules_param
+  local rules_url
+
+  # Timeout period for console URL (in seconds) 
+  local timeout=240
+
+  console_output_file="TEMP_CONSOLE.txt"
+
+
+  inc_separator
+  prom_namespace=$1
+  inc_title "prometheus metrics related to $prom_namespace"
+
+  # For prom alert rules
+  case $prom_namespace in
+    openshift-cloud-credential-operator)
+    promql_rules_param='cco_credentials_requests_conditions{condition=~"CredentialsDeprovisionFailure|CloudCredentialOperatorDeprovisioningFailed|CloudCredentialOperatorInsufficientCloudCreds|CloudCredentialOperatorProvisioningFailed|CloudCredentialOperatorStaleCredentials|CloudCredentialOperatorTargetNamespaceMissing"}'
+    ;;
+  esac
+
+
+  echo -e "${GRN}Collecting console url...${NC}"
+
+  # For backplane console runs in the same terminal
+  if [[ -z ${console_url} ]]; then
+    podman machine init &> /dev/null
+    sleep 1
+    podman machine start &> /dev/null
+    podman container rm --all --force -i --depend &> /dev/null
+
+    pkill -9 -f "backplane console"
+    sleep 15
+    rm $console_output_file &> /dev/null
+    
+    touch $console_output_file
+
+  # Capturing Console URL ---
+    ocm backplane console >> $console_output_file 2>&1  &
+
+    local skipped=true
+    for i in $(seq 1 $timeout); do
+      if grep -q -e "http" -e "rror" $console_output_file; then
+        console_url=$( cat $console_output_file | awk '/available at/ {print $6}')
+        skipped=false
+        break
+      fi
+      sleep 1
+    done
+  fi
+
+ # Console URL fetched ---
+  if echo "$console_url" | grep -q "http"; then
+    echo -e "Success: ${GRN}$console_url${NC}\n"
+  
+  elif [[ $skipped == true ]]; then
+    echo -e "${YEL}TIMEOUT ERROR: Unable to retrieve the Console URL.${NC}"
+    echo -e "skipping prometheus..."
+    console_url=""
+    return 1
+
+  else
+    local console_error=$(<$console_output_file)
+    echo -e "${YEL}The following error occurs while trying to get console URL:\n${RED}--\n$console_error\n--${NC}"
+    echo -e "skipping prometheus..."
+    console_url=""
+    return 1
+  fi
+
+
+ # Dashboard ----
+  echo -e "${GRN}1. MONITORING DASHBOARD${NC}"
+  dashboard_query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=$prom_namespace&type=deployment"
+  dashboard_url="$console_url/$dashboard_query"
+  echo -e "$dashboard_url"
+
+  
+  # Failed jobs ----
+  echo -e "\n"
+  echo -e "${GRN}2. FAILED jobs inside the namespace/$prom_namespace${NC}"
+  promql_param='kube_job_status_failed{namespace="USED_NAMESPACE"}'
+  promql_param_encoded=$(jq -rn --arg x ${promql_param//USED_NAMESPACE/$prom_namespace} '$x|@uri')
+  failed_jobs_query="monitoring/query-browser?query0=$promql_param_encoded"
+  failed_jobs_url="$console_url/$failed_jobs_query"
+  echo -e "$failed_jobs_url"
+
+  # Prometheus alert rules --- 
+  # NOTE: For supported operators
+  if [[ -n "$promql_rules_param" ]]; then
+      echo -e "\n"
+      echo -e "${GRN}3. FIRED ALERT rules for namespace/$prom_namespace${NC}"
+      promql_rules_param_encoded=$(jq -rn --arg x ${promql_rules_param} '$x|@uri')
+      rules_query="monitoring/query-browser?query0=$promql_rules_param_encoded"
+      alert_rules_url="$console_url/$rules_query"
+      echo -e "$alert_rules_url"
+  fi
+
+  echo -e "\n"
+  echo -e "${GRN}Opening the URLs in the browser ..${NC}"
+  $OPEN "$dashboard_url" &>/dev/null
+  $OPEN "$failed_jobs_url" &>/dev/null
+  if [[ -n "$promql_rules_param" ]]; then
+    $OPEN "$alert_rules_url" &>/dev/null
+  fi
+}
+
+search_kcs() {
+  local search_header="openshift-cloud-credential-operator"
+  local search_params='documentKind:("Solution")'
+  local api_url_pattern="https://api.access.redhat.com/support/search/kcs?fq=P_DATA&q=Q_DATA&rows=3&start=0"
+
+  inc_separator
+  if [[ ${#search_strings[@]} -eq 0 ]]; then 
+    echo -e "${GRN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cloud-credential pods${NC}"
+    return 1
+  fi
+  echo -e "${YEL}Searching for KCS Solutions...${NC}"
+  for issue in "${!search_strings[@]}"; do
+    issue="${issue##*:}"
+    compiled_search="$search_header $issue"
+    compiled_search_encoded=$(jq -rn --arg x "$compiled_search" '$x|@uri')
+    search_params_encoded=$(jq -rn --arg x "$search_params" '$x|@uri')
+
+    api_url="$api_url_pattern"
+    api_url=${api_url//P_DATA/$search_params_encoded}
+    api_url=${api_url//Q_DATA/$compiled_search_encoded}
+
+    echo -e "\nDetected issue: ${YEL}$issue${NC}"
+    echo -e "Suggested KCS solution(s):"
+
+    kcs_solutions=$(curl -s -u "$username:$password" "$api_url" | jq -r '.response.docs | .[] | .view_uri')
+    echo -e "${GRN}${kcs_solutions:-Nothing was found}${NC}"
+    echo -e ""
+  done
+}
+
+
 ### Cloud credential ###
 run_cloud_credential_operator() {
   cco_status
@@ -181,154 +328,6 @@ cco_pod_logs() {
     done <<< "$err_logs"
   done
 }
-
-# For KCS search ----
-search_kcs() {
-  local search_header="openshift-cloud-credential-operator"
-  local search_params='documentKind:("Solution")'
-  local api_url_pattern="https://api.access.redhat.com/support/search/kcs?fq=P_DATA&q=Q_DATA&rows=3&start=0"
-
-  inc_separator
-  if [[ ${#search_strings[@]} -eq 0 ]]; then 
-    echo -e "${GRN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cloud-credential pods${NC}"
-    return 1
-  fi
-  echo -e "${YEL}Searching for KCS Solutions...${NC}"
-  for issue in "${!search_strings[@]}"; do
-    issue="${issue##*:}"
-    compiled_search="$search_header $issue"
-    compiled_search_encoded=$(jq -rn --arg x "$compiled_search" '$x|@uri')
-    search_params_encoded=$(jq -rn --arg x "$search_params" '$x|@uri')
-
-    api_url="$api_url_pattern"
-    api_url=${api_url//P_DATA/$search_params_encoded}
-    api_url=${api_url//Q_DATA/$compiled_search_encoded}
-
-    echo -e "\nDetected issue: ${YEL}$issue${NC}"
-    echo -e "Suggested KCS solution(s):"
-
-    kcs_solutions=$(curl -s -u "$username:$password" "$api_url" | jq -r '.response.docs | .[] | .view_uri')
-    echo -e "${GRN}${kcs_solutions:-Nothing was found}${NC}"
-    echo -e ""
-  done
-}
-
- # Prometheus link --- 
- # For supported operators
-get_prometheus_graph_links() {
-  local prom_namespace
-  local promql_rules_param
-  local rules_url
-
-  # Timeout period for console URL (in seconds) 
-  local timeout=240
-
-  console_output_file="TEMP_CONSOLE.txt"
-
-
-  inc_separator
-  prom_namespace=$1
-  inc_title "prometheus metrics related to $prom_namespace"
-
-  # For prom alert rules
-  case $prom_namespace in
-    openshift-cloud-credential-operator)
-    promql_rules_param='cco_credentials_requests_conditions{condition=~"CredentialsDeprovisionFailure|CloudCredentialOperatorDeprovisioningFailed|CloudCredentialOperatorInsufficientCloudCreds|CloudCredentialOperatorProvisioningFailed|CloudCredentialOperatorStaleCredentials|CloudCredentialOperatorTargetNamespaceMissing"}'
-    ;;
-  esac
-
-
-  echo -e "${GRN}Collecting console url...${NC}"
-
-  # For backplane console runs in the same terminal
-  if [[ -z ${console_url} ]]; then
-    podman machine init &> /dev/null
-    sleep 1
-    podman machine start &> /dev/null
-    podman container rm --all --force -i --depend &> /dev/null
-
-    pkill -9 -f "backplane console"
-    sleep 15
-    rm $console_output_file &> /dev/null
-    
-    touch $console_output_file
-
-  # Capturing Console URL ---
-    ocm backplane console >> $console_output_file 2>&1  &
-
-    local skipped=true
-    for i in $(seq 1 $timeout); do
-      if grep -q -e "http" -e "rror" $console_output_file; then
-        console_url=$( cat $console_output_file | awk '/available at/ {print $6}')
-        skipped=false
-        break
-      fi
-      sleep 1
-    done
-  fi
-
- # Console URL fetched ---
-  if echo "$console_url" | grep -q "http"; then
-    echo -e "Success: ${GRN}$console_url${NC}\n"
-  
-  elif [[ $skipped == true ]]; then
-    echo -e "${YEL}TIMEOUT ERROR: Unable to retrieve the Console URL.${NC}"
-    echo -e "skipping prometheus..."
-    console_url=""
-    return 1
-
-  else
-    local console_error=$(<$console_output_file)
-    echo -e "${YEL}The following error occurs while trying to get console URL:\n${RED}--\n$console_error\n--${NC}"
-    echo -e "skipping prometheus..."
-    console_url=""
-    return 1
-  fi
-
-
- # Dashboard ----
-  echo -e "${GRN}1. MONITORING DASHBOARD${NC}"
-  dashboard_query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=$prom_namespace&type=deployment"
-  dashboard_url="$console_url/$dashboard_query"
-  echo -e "$dashboard_url"
-
-  
-  # Failed jobs ----
-  echo -e "\n"
-  echo -e "${GRN}2. FAILED jobs inside the namespace/$prom_namespace${NC}"
-  promql_param='kube_job_status_failed{namespace="USED_NAMESPACE"}'
-  promql_param_encoded=$(jq -rn --arg x ${promql_param//USED_NAMESPACE/$prom_namespace} '$x|@uri')
-  failed_jobs_query="monitoring/query-browser?query0=$promql_param_encoded"
-  failed_jobs_url="$console_url/$failed_jobs_query"
-  echo -e "$failed_jobs_url"
-
-  # Prometheus alert rules --- 
-  # For supported operators
-  if [[ -n "$promql_rules_param" ]]; then
-      echo -e "\n"
-      echo -e "${GRN}3. FIRED ALERT rules for namespace/$prom_namespace${NC}"
-      promql_rules_param_encoded=$(jq -rn --arg x ${promql_rules_param} '$x|@uri')
-      rules_query="monitoring/query-browser?query0=$promql_rules_param_encoded"
-      alert_rules_url="$console_url/$rules_query"
-      echo -e "$alert_rules_url"
-  fi
-
-  echo -e "\n"
-  echo -e "${GRN}Opening the URLs in the browser ..${NC}"
-  $OPEN "$dashboard_url" &>/dev/null
-  $OPEN "$failed_jobs_url" &>/dev/null
-  if [[ -n "$promql_rules_param" ]]; then
-    $OPEN "$alert_rules_url" &>/dev/null
-  fi
-}
-
-# Additional Information ------
-print_additional_info() {
-  inc_separator
-  inc_title "Additional Information :"
-  echo -e "To get in touch with OCP engineering for this operator, join ${GRN}$1${NC} slack channel for any inquiries."
-}
-
 
 main() {
   if [[ -z $cluster_id ]]; then echo -e "${YEL}missing cluster ID${NC}"; exit 1; fi
