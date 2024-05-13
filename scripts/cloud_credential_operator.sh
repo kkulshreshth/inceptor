@@ -187,10 +187,10 @@ get_prometheus_graph_links() {
 
   echo -e "\n"
   echo -e "${GRN}Opening the URLs in the browser ..${NC}"
-  $OPEN "$dash_url" &>/dev/null
+  $OPEN "$dashboard_url" &>/dev/null
   $OPEN "$failed_jobs_url" &>/dev/null
   if [[ -n "$promql_rules_param" ]]; then
-    $OPEN "$rules_url" &>/dev/null
+    $OPEN "$alert_rules_url" &>/dev/null
   fi
 }
 
