@@ -182,6 +182,7 @@ search_kcs() {
   fi
   echo -e "${YEL}Searching for KCS Solutions...${NC}"
   for issue in "${!search_strings[@]}"; do
+    issue="${issue##*:}"
     compiled_search="$search_header $issue"
     compiled_search_encoded=$(jq -rn --arg x "$compiled_search" '$x|@uri')
     search_params_encoded=$(jq -rn --arg x "$search_params" '$x|@uri')
@@ -200,7 +201,7 @@ search_kcs() {
 }
 
  # For KCS search strs of logs --------
-  logs_search_patterns=("CredentialsProvisionFailure" "InsufficientCloudCreds" "ebs-cloud-credentials not found" "disabled")
+  logs_search_patterns=("CredentialsProvisionFailure" "InsufficientCloudCreds" "ebs-cloud-credentials not found" "disabled" "empty awsSTSIAMRoleARN" "InvalidClientTokenId" "unable to read info for username")
   for search_str in "${logs_search_patterns[@]}"; do
     err_logs=$(grep --color=never -F "${search_str}" <<< ${full_pod_logs:-$pod_logs})
     if [[ -z $err_logs ]]; then continue; fi
