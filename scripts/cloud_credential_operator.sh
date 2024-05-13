@@ -31,7 +31,7 @@ format_logs() {
 
 # Cluster login via ocm backplane ---
 inc_login() {
-  echo -e "\n${YEL}Logging into cluster \"${cluster_id}\" via backplane...${NC}\n"
+  echo -e "\n${YEL}Logging into cluster via backplane...${NC}\n"
   ocm_outuput=$(ocm backplane login $cluster_id)
   whoami_output=$(oc whoami 2>&1)
   if [[ $whoami_output == *"rror"* ]]; then
