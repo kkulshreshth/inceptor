@@ -15,7 +15,7 @@ Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for op
 # Usage:
 Current version: 0.1.0
 The current version contains the following commands/sub-commands:
-1. check (c) : check is the main command that is used for troubleshotting the operators. You need to provide the operator name as sub-command to specify which operator to troubleshoot.
+1. check (c) : check is the main command that is used for troubleshooting the operators. You need to provide the operator name as sub-command to specify which operator to troubleshoot.
    SUB-COMMANDS: 
    - cluster-health (ch): This sub-command runs many health check tasks against the cluster and prints out the results.
    - authentication (auth): This sub-command checks information related to authentication operator.
