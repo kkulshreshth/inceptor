@@ -22,7 +22,7 @@ The current version contains the following commands/sub-commands:
    - cloud-credential (cc): This sub-command checks information related to the cloud-credential operator
    - image-registry (ir): This sub-command checks information related to the image-registry operator
 
-Example:
+Syntax:
 ```
 inceptor check <operator-name> <cluster-id>
 ```
@@ -31,3 +31,10 @@ where,
 - check is the command
 - <operator-name> is a nested-command or a sub command (for example: authentication or auth)
 - <cluster-id> is a command line argument (External ID of the cluster)
+
+Examples:
+```
+inceptor check authentication 6a38bbe6-a160-4e54-a14f-xxxxxxxxxx
+OR
+inceptor check auth 6a38bbe6-a160-4e54-a14f-xxxxxxxxxx
+```
