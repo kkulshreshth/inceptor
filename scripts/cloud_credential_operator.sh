@@ -11,7 +11,7 @@ NC='\x1B[0m' # RESET
 cluster_id=$1
 
 # For KCS search string
-declare -A search_strings
+declare -g -A search_strings
 
 # Title, separator, logs format ---
 inc_title() {
@@ -41,7 +41,6 @@ inc_login() {
   fi
 }
 
-
 print_json() {
   OUTPUT_FORMAT="${OUTPUT_FORMAT:-yaml}"
 
@@ -69,7 +68,7 @@ get_basic_info() {
   inc_separator
   inc_title "Listing basic information about the cluster..."
   osdctl -S cluster context $cluster_id
-  
+
   inc_separator
   inc_title "Listing the service logs sent in past 30 days..."
   osdctl -S servicelog list $cluster_id
@@ -86,18 +85,15 @@ print_additional_info() {
   echo -e "To get in touch with OCP engineering for this operator, join ${GRN}$1${NC} slack channel for any inquiries."
 }
 
- # Prometheus link --- 
- # For supported operators
-get_prometheus_graph_links() {
+  # Prometheus link ---
+  # For supported operators
+cco_get_prometheus_graph_links() {
   local prom_namespace
   local promql_rules_param
   local rules_url
 
-  # Timeout period for console URL (in seconds) 
-  local timeout=240
 
   console_output_file="TEMP_CONSOLE.txt"
-
 
   inc_separator
   prom_namespace=$1
@@ -109,7 +105,6 @@ get_prometheus_graph_links() {
     promql_rules_param='cco_credentials_requests_conditions{condition=~"CredentialsDeprovisionFailure|CloudCredentialOperatorDeprovisioningFailed|CloudCredentialOperatorInsufficientCloudCreds|CloudCredentialOperatorProvisioningFailed|CloudCredentialOperatorStaleCredentials|CloudCredentialOperatorTargetNamespaceMissing"}'
     ;;
   esac
-
 
   echo -e "${GRN}Collecting console url...${NC}"
 
@@ -123,14 +118,14 @@ get_prometheus_graph_links() {
     pkill -9 -f "backplane console"
     sleep 15
     rm $console_output_file &> /dev/null
-    
+
     touch $console_output_file
 
   # Capturing Console URL ---
     ocm backplane console >> $console_output_file 2>&1  &
 
     local skipped=true
-    for i in $(seq 1 $timeout); do
+    for i in $(seq 1 240); do
       if grep -q -e "http" -e "rror" $console_output_file; then
         console_url=$( cat $console_output_file | awk '/available at/ {print $6}')
         skipped=false
@@ -140,10 +135,10 @@ get_prometheus_graph_links() {
     done
   fi
 
- # Console URL fetched ---
+  # Console URL fetched ---
   if echo "$console_url" | grep -q "http"; then
     echo -e "Success: ${GRN}$console_url${NC}\n"
-  
+
   elif [[ $skipped == true ]]; then
     echo -e "${YEL}TIMEOUT ERROR: Unable to retrieve the Console URL.${NC}"
     echo -e "skipping prometheus..."
@@ -158,14 +153,12 @@ get_prometheus_graph_links() {
     return 1
   fi
 
-
- # Dashboard ----
+  # Dashboard ----
   echo -e "${GRN}1. MONITORING DASHBOARD${NC}"
   dashboard_query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=$prom_namespace&type=deployment"
   dashboard_url="$console_url/$dashboard_query"
   echo -e "$dashboard_url"
 
-  
   # Failed jobs ----
   echo -e "\n"
   echo -e "${GRN}2. FAILED jobs inside the namespace/$prom_namespace${NC}"
@@ -175,7 +168,8 @@ get_prometheus_graph_links() {
   failed_jobs_url="$console_url/$failed_jobs_query"
   echo -e "$failed_jobs_url"
 
-  # Prometheus alert rules --- 
+
+  # Prometheus alert rules ---
   # For supported operators
   if [[ -n "$promql_rules_param" ]]; then
       echo -e "\n"
@@ -196,13 +190,14 @@ get_prometheus_graph_links() {
 }
 
 # For KCS search ----
-search_kcs() {
-  local search_header="openshift-cloud-credential-operator"
+cco_search_kcs() {
+  local search_header=""
   local search_params='documentKind:("Solution")'
   local api_url_pattern="https://api.access.redhat.com/support/search/kcs?fq=P_DATA&q=Q_DATA&rows=3&start=0"
 
   inc_separator
-  if [[ ${#search_strings[@]} -eq 0 ]]; then 
+  if [[ ${#search_strings[@]} -eq 0 ]]; then
+
     echo -e "${GRN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cloud-credential pods${NC}"
     return 1
   fi
@@ -226,14 +221,13 @@ search_kcs() {
   done
 }
 
-### Cloud credential ###
 run_cloud_credential_operator() {
   cco_status
   cco_pods
   cco_resource
   cco_pod_logs
-  search_kcs
-  get_prometheus_graph_links "openshift-cloud-credential-operator"
+  cco_search_kcs
+  cco_get_prometheus_graph_links "openshift-cloud-credential-operator"
   print_additional_info "forum-cloud-credential-operator"
 }
 
@@ -277,10 +271,7 @@ cco_resource() {
 
 cco_pod_logs() {
   inc_separator
-  local pod_logs
-  local logs_answer
-  local full_pod_logs
-  local default_logs=15
+  default_logs=15
 
   inc_title "Gathering pod logs for Cloud Credential Operator..."
   pod_logs=$(oc -n openshift-cloud-credential-operator logs --tail=$default_logs deployment/cloud-credential-operator -c cloud-credential-operator)
@@ -290,8 +281,8 @@ cco_pod_logs() {
     return 1
   fi
 
-  local formated_pod_logs=$(format_logs "$pod_logs")
-  echo -e "$formated_pod_logs"
+  formatted_pod_logs=$(format_logs "$pod_logs")
+  echo -e "$formatted_pod_logs"
 
   while true; do
   echo -e "\n"
@@ -299,11 +290,12 @@ cco_pod_logs() {
     case $logs_answer in
       [yY])
         echo -e "${GRN}Collecting the full logs ..${NC}"
-        
-        #For full logs (1000 logs)
+
+        # #For full logs (1000 logs)
         full_pod_logs=$(oc -n openshift-cloud-credential-operator logs --tail=1000 deployment/cloud-credential-operator -c cloud-credential-operator 2>&1)
-        local formatted_full_pod_logs=$(format_logs "$full_pod_logs")
+        formatted_full_pod_logs=$(format_logs "$full_pod_logs")
         echo -e "$formatted_full_pod_logs" | less -r
+        echo -e "${GRN}The full logs window has been closed.${NC}"
         break
       ;;
       [nN])
@@ -315,10 +307,10 @@ cco_pod_logs() {
     esac
   done
 
- # For KCS search strs of logs ----
+  # For KCS search strs of logs ----
   logs_search_patterns=("CredentialsProvisionFailure" "InsufficientCloudCreds" "ebs-cloud-credentials not found" "disabled" "empty awsSTSIAMRoleARN" "InvalidClientTokenId" "unable to read info for username")
   for search_str in "${logs_search_patterns[@]}"; do
-    err_logs=$(grep --color=never -F "${search_str}" <<< ${full_pod_logs:-$pod_logs})
+    local err_logs=$(grep --color=never -F "${search_str}" <<< ${full_pod_logs:-$pod_logs})
     if [[ -z $err_logs ]]; then continue; fi
 
     while IFS= read -r line; do
@@ -334,7 +326,7 @@ main() {
   os_default_browser
   inc_login
   get_basic_info
-  run_cloud_credential_operator
+  (set +e; run_cloud_credential_operator; return 0)
 }
 
 main
