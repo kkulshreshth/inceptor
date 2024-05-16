@@ -8,7 +8,7 @@ YEL='\x1B[0;33m'
 BGRN='\x1B[1;32m'
 GRN='\x1B[0;32m'
 NC='\x1B[0m' # RESET
-cluster_id=$1
+cluster_id="${args[clusterid]:-$1}"
 
 # For KCS search string
 declare -g -A search_strings
@@ -153,6 +153,7 @@ cco_get_prometheus_graph_links() {
     return 1
   fi
 
+
   # Dashboard ----
   echo -e "${GRN}1. MONITORING DASHBOARD${NC}"
   dashboard_query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=$prom_namespace&type=deployment"
@@ -183,7 +184,9 @@ cco_get_prometheus_graph_links() {
   echo -e "\n"
   echo -e "${GRN}Opening the URLs in the browser ..${NC}"
   $OPEN "$dashboard_url" &>/dev/null
+  sleep 1
   $OPEN "$failed_jobs_url" &>/dev/null
+  sleep 1
   if [[ -n "$promql_rules_param" ]]; then
     $OPEN "$alert_rules_url" &>/dev/null
   fi
@@ -196,6 +199,9 @@ cco_search_kcs() {
   local api_url_pattern="https://api.access.redhat.com/support/search/kcs?fq=P_DATA&q=Q_DATA&rows=3&start=0"
 
   inc_separator
+  echo -e "${YEL}Building search string${RESET}"
+  echo
+    
   if [[ ${#search_strings[@]} -eq 0 ]]; then
 
     echo -e "${GRN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cloud-credential pods${NC}"
@@ -326,7 +332,7 @@ main() {
   os_default_browser
   inc_login
   get_basic_info
-  (set +e; run_cloud_credential_operator; return 0)
+  run_cloud_credential_operator
 }
 
 main

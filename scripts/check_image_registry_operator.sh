@@ -5,9 +5,10 @@ GREEN="\033[32m"
 YELLOW="\033[33m"
 BLUE="\033[44m"
 RESET="\033[0m"
-cluster_id=$1
+cluster_id="${args[clusterid]:-$1}"
 search_string="image%20registry%20operator%20degraded%20in%20OpenShift"
 do_kcs_search="true"
+keyword_counter=0
 
 echo "Enter your username (ex: rhn-support-<kerberos>):"
 read username
@@ -22,15 +23,27 @@ login_via_backplane() {
     ocm backplane login $cluster_id
 }
 
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
 get_basic_info() {
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo -e "${YELLOW}Listing basic information about the cluster...${RESET}"
-    osdctl cluster context $cluster_id
+    osdctl -S cluster context $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
-    osdctl servicelog list $cluster_id
+    osdctl -S servicelog list $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
@@ -76,7 +89,7 @@ check_image_registry_operator_pod_logs() {
     if [ -n "$operator_pod" ]; then
         echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
         echo
-        log_output=$(oc --tail 10 logs -n openshift-image-registry "$operator_pod" | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|ImagePrunerDegraded|RequestError|x509')
+        log_output=$(oc --tail 10 logs -n openshift-image-registry "$operator_pod")
         colored_logs="$log_output"
         for word in "${red_flags[@]}"; do
             colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
@@ -99,7 +112,7 @@ check_image_registry_pod_logs() {
 
     echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
     echo
-    log_output=$(oc --tail 10 -n openshift-image-registry logs deployment/image-registry | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|ImagePrunerDegraded|RequestError|x509')
+    log_output=$(oc --tail 10 -n openshift-image-registry logs deployment/image-registry)
     colored_logs="$log_output"
     for word in "${red_flags[@]}"; do
         colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
@@ -156,6 +169,7 @@ job_pruning_issues() {
 }
 
 print_additional_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Additional Information:${RESET}"
     echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}forum-imageregistry${RESET} slack channel and ping ${GREEN}@imageregistry-team${RESET} handle with any queries."
@@ -186,8 +200,14 @@ build_search_string() {
             if [[ $operator_degraded_message =~ $search_str ]]; then
                 # If found, append it to the variable
                 found_strings="$found_strings $search_str"
+                keyword_counter=$keyword_counter + 1
             fi
         done
+
+        if [ "$keyword_counter" -eq 0 ]; then
+            # If keyword_counter is  equal to 0, send the original message as found string
+            found_strings="$operator_degraded_message"
+        fi
 
         # Print the result
         #echo "Found strings: $found_strings"
@@ -195,7 +215,6 @@ build_search_string() {
         updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
         search_string="$search_string%20$updated_operator_degraded_message"
         #echo "NEW SEARCH STRINGS: $search_string"
-        echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     fi
 }
 
@@ -224,28 +243,68 @@ search_kcs() {
 }
 
 get_prometheus_graph_links() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Running prometheus queries...${RESET}"
     echo -e "${YELLOW}Please navigate to the following links to review metrics related to the image registry operator:${RESET}"
     echo
 
-    command_to_run="ocm backplane console $cluster_id"
+    echo -e "${GRN}Collecting console url...${NC}"
+    console_output_file="TEMP_CONSOLE.txt"
 
-    # Define the file to store the command output
-    output_file="console_url_file.txt"
 
-    # Step 1: Open a new terminal, run the command, and store its output
-    gnome-terminal -- bash -c "$command_to_run > $output_file; read -n 1 -p 'Press any key to exit.'; exit"
+    # For backplane console runs in the same terminal
+    if [[ -z ${console_url} ]]; then
+        podman machine init &> /dev/null
+        sleep 1
+        podman machine start &> /dev/null
+        podman container rm --all --force -i --depend &> /dev/null
 
-    sleep 60
+        pkill -9 -f "backplane console"
+        sleep 15
+        rm $console_output_file &> /dev/null
 
-    console_url=$(grep -o 'http[^\ ]*' $output_file)
+        touch $console_output_file
+
+    # Capturing Console URL ---
+        ocm backplane console >> $console_output_file 2>&1  &
+
+        local skipped=true
+        for i in $(seq 1 240); do
+        if grep -q -e "http" -e "rror" $console_output_file; then
+            console_url=$( cat $console_output_file | awk '/available at/ {print $6}')
+            skipped=false
+            break
+        fi
+        sleep 1
+        done
+    fi
+
+    # Console URL fetched ---
+    if echo "$console_url" | grep -q "http"; then
+        echo -e "Success: ${GRN}$console_url${NC}\n"
+
+    elif [[ $skipped == true ]]; then
+        echo -e "${YEL}TIMEOUT ERROR: Unable to retrieve the Console URL.${NC}"
+        echo -e "skipping prometheus..."
+        console_url=""
+        return 1
+
+    else
+        local console_error=$(<$console_output_file)
+        echo -e "${YEL}The following error occurs while trying to get console URL:\n${RED}--\n$console_error\n--${NC}"
+        echo -e "skipping prometheus..."
+        console_url=""
+        return 1
+    fi
 
     echo -e "${GREEN}1. MONITORING DASHBOARD for namespace/openshift-image-registry: ${RESET}"
     query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-image-registry&type=deployment"
     echo
     query_url="$console_url/$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    sleep 1
     echo
     echo -e "${GREEN}2. Query Executed:${RESET} kube_job_status_failed{namespace="openshift-image-registry"}"
     echo -e "This query provides information about the ${GREEN}FAILED${RESET} jobs inside the namespace/openshift-image_registry"
@@ -253,11 +312,13 @@ get_prometheus_graph_links() {
     query="monitoring/query-browser?query0=kube_job_status_failed%7Bnamespace%3D%22openshift-image-registry%22%7D"
     query_url="$console_url/$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
     echo
 }
 
 main() {
     login_via_backplane
+    os_default_browser
     get_basic_info
     check_image_registry_operator_status
     check_operator_resources
@@ -267,7 +328,7 @@ main() {
     job_pruning_issues
     build_search_string
     search_kcs
-    #get_prometheus_graph_links
+    get_prometheus_graph_links
     print_additional_info
 }
 

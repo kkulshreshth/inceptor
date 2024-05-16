@@ -5,9 +5,10 @@ GREEN="\033[32m"
 YELLOW="\033[33m"
 BLUE="\033[44m"
 RESET="\033[0m"
-cluster_id=$1
+cluster_id="${args[clusterid]:-$1}"
 search_string="authentication%20operator%20degraded%20in%20OpenShift"
 do_kcs_search="true"
+keyword_counter=0
 
 echo "Enter your username (ex: rhn-support-<kerberos>):"
 read username
@@ -21,16 +22,28 @@ login_via_backplane() {
     ocm backplane login $cluster_id
 }
 
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
 # Function to get basic info about the cluster
 get_basic_info() {
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo -e "${YELLOW}Listing basic information about the cluster...${RESET}"
-    osdctl cluster context $cluster_id
+    osdctl -S cluster context $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
-    osdctl servicelog list $cluster_id
+    osdctl -S servicelog list $cluster_id
     echo
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
@@ -66,13 +79,14 @@ check_operator_resources() {
     echo -e "${GREEN}PODS:${RESET}"
     oc -n openshift-authentication-operator  get pod
     oc -n openshift-authentication get pod
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
 }
 
 
 # Function to gather Authentication Operator logs.
 get_authentication_operator_logs() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
     echo -e "${YELLOW}Gathering Authentication Operator Pod Logs...${RESET}"
     operator_pod=$(oc get pods -n openshift-authentication-operator -o=jsonpath='{.items[0].metadata.name}')
     
@@ -81,7 +95,7 @@ get_authentication_operator_logs() {
     if [ -n "$operator_pod" ]; then
         echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
         echo
-        log_output=$(oc --tail 500 logs -n openshift-authentication-operator "$operator_pod" | grep -E 'error|failed|degraded|timeout|expire|canceled')
+        log_output=$(oc --tail 25 logs -n openshift-authentication-operator "$operator_pod")
 
         colored_logs="$log_output"
         for word in "${red_flags[@]}"; do
@@ -90,7 +104,6 @@ get_authentication_operator_logs() {
 
         # Print the colored logs
         echo -e "$colored_logs"
-        #print_horizontal_line "-" 120
     else
         echo "No Authentication Operator pod found."
     fi
@@ -98,6 +111,7 @@ get_authentication_operator_logs() {
 
 # Build keyword search string for searching KCS solutions:
 build_search_string() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo -e "${YELLOW}Building search string${RESET}"
     echo
     operator_degraded_message=$(oc get co authentication -o json | jq -r '.status.conditions[] | select(.type == "Degraded" and .status == "True") | .message')
@@ -122,8 +136,14 @@ build_search_string() {
             if [[ $operator_degraded_message =~ $search_str ]]; then
                 # If found, append it to the variable
                 found_strings="$found_strings $search_str"
+                keyword_counter=$keyword_counter + 1
             fi
         done
+
+        if [ "$keyword_counter" -eq 0 ]; then
+            # If keyword_counter is  equal to 0, send the original message as found string
+            found_strings="$operator_degraded_message"
+        fi
 
         # Print the result
         #echo "Found strings: $found_strings"
@@ -131,7 +151,6 @@ build_search_string() {
         updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
         search_string="$search_string%20$updated_operator_degraded_message"
         #echo "NEW SEARCH STRINGS: $search_string"
-        echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     fi
 }
 
@@ -162,6 +181,7 @@ search_kcs() {
 
 # Function to gather OAuth server logs
 get_oauth_server_logs() {
+    echo
     echo -e "${YELLOW}Checking OAuth Pod Status...${RESET}"
     echo 
     echo -e "${GREEN}oc get pods -n openshift-authentication${RESET}"
@@ -174,17 +194,17 @@ get_oauth_server_logs() {
         pod1=$(oc get pod -n openshift-authentication | awk 'NR==2{print $1}')
         echo
         echo -e "${GREEN}Capturing logs from pod/$pod1${RESET}"
-        oc --tail 100 logs $pod1 -n openshift-authentication | grep -E 'error|failed|degraded|timeout|expire|canceled'
+        oc --tail 10 logs $pod1 -n openshift-authentication
         
         pod2=$(oc get pod -n openshift-authentication | awk 'NR==3{print $1}')
         echo
         echo -e "${GREEN}Capturing logs from pod/$pod2${RESET}"
-        oc --tail 100 logs $pod2 -n openshift-authentication | grep -E 'error|failed|degraded|timeout|expire|canceled'
+        oc --tail 10 logs $pod2 -n openshift-authentication
         
         pod3=$(oc get pod -n openshift-authentication | awk 'NR==4{print $1}')
         echo
         echo -e "${GREEN}Capturing logs from pod/$pod3${RESET}"
-        oc --tail 100 logs $pod3 -n openshift-authentication | grep -E 'error|failed|degraded|timeout|expire|canceled'
+        oc --tail 10 logs $pod3 -n openshift-authentication
         echo
     else
         echo "No OAuth Server pod found."
@@ -192,6 +212,7 @@ get_oauth_server_logs() {
 }
 
 get_users_and_identities() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     # Check user and identity count
     echo -e "${YELLOW}Checking user and identity count for any discrepency. The user count is always greater than the identity count due to backplane user. If this difference is more than 1, it is considered an a discrepency.${RESET}"
     user_count=$(oc get users | grep -v NAME | wc -l)
@@ -218,7 +239,7 @@ get_users_and_identities() {
 }
 
 gather_route_data(){
-    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo -e "${YELLOW}Gathering data for route...${RESET}"
     echo
     echo -e "${GREEN}oc get route -n openshift-authentication${RESET}"
@@ -227,28 +248,69 @@ gather_route_data(){
 }
 
 get_prometheus_graph_links() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
     echo -e "${YELLOW}Running prometheus queries...${RESET}"
     echo -e "${YELLOW}Please navigate to the following links to review metrics related to the authentication operator:${RESET}"
     echo
 
-    command_to_run="ocm backplane console $cluster_id"
+    echo -e "${GRN}Collecting console url...${NC}"
+    console_output_file="TEMP_CONSOLE.txt"
 
-    # Define the file to store the command output
-    output_file="console_url_file.txt"
 
-    # Step 1: Open a new terminal, run the command, and store its output
-    gnome-terminal -- bash -c "$command_to_run > $output_file; read -n 1 -p 'Press any key to exit.'; exit"
-    
-    sleep 60
+    # For backplane console runs in the same terminal
+    if [[ -z ${console_url} ]]; then
+        podman machine init &> /dev/null
+        sleep 1
+        podman machine start &> /dev/null
+        podman container rm --all --force -i --depend &> /dev/null
 
-    console_url=$(grep -o 'http[^\ ]*' $output_file)
+        pkill -9 -f "backplane console"
+        sleep 15
+        rm $console_output_file &> /dev/null
+
+        touch $console_output_file
+
+    # Capturing Console URL ---
+        ocm backplane console >> $console_output_file 2>&1  &
+
+        local skipped=true
+        for i in $(seq 1 240); do
+        if grep -q -e "http" -e "rror" $console_output_file; then
+            console_url=$( cat $console_output_file | awk '/available at/ {print $6}')
+            skipped=false
+            break
+        fi
+        sleep 1
+        done
+    fi
+
+    # Console URL fetched ---
+    if echo "$console_url" | grep -q "http"; then
+        echo -e "Success: ${GRN}$console_url${NC}\n"
+
+    elif [[ $skipped == true ]]; then
+        echo -e "${YEL}TIMEOUT ERROR: Unable to retrieve the Console URL.${NC}"
+        echo -e "skipping prometheus..."
+        console_url=""
+        return 1
+
+    else
+        local console_error=$(<$console_output_file)
+        echo -e "${YEL}The following error occurs while trying to get console URL:\n${RED}--\n$console_error\n--${NC}"
+        echo -e "skipping prometheus..."
+        console_url=""
+        return 1
+    fi
+
 
     echo -e "${GREEN}1. MONITORING DASHBOARD for namespace/openshift-authentication: ${RESET}"
     query="monitoring/dashboards/grafana-dashboard-k8s-resources-workloads-namespace?namespace=openshift-authentication&type=deployment"
     echo
     query_url="$console_url/$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    sleep 1
     echo
 
     echo -e "${GREEN}2. MONITORING DASHBOARD for namespace/openshift-authentication-operator: ${RESET}"
@@ -256,6 +318,8 @@ get_prometheus_graph_links() {
     echo
     query_url="$console_url/$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    sleep 1
     echo
 
     echo -e "${GREEN}3. Query Executed:${RESET} ${YELLOW}up{service="metrics", namespace="openshift-authentication-operator"}${RESET}"
@@ -263,6 +327,8 @@ get_prometheus_graph_links() {
     query="up%7Bservice%3D%22metrics%22%2C+namespace%3D%22openshift-authentication-operator%22%7D"
     query_url="$console_url/monitoring/query-browser?query0=$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    sleep 1
     echo
 
     echo -e "${GREEN}4. Query Executed:${RESET} ${YELLOW}sum(rate(kube_pod_container_status_restarts_total{pod=~"authentication-operator.*"}[5m]))${RESET}"
@@ -270,6 +336,8 @@ get_prometheus_graph_links() {
     query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~"authentication-operator.*"%7D%5B5m%5D%29%29"
     query_url="$console_url/monitoring/query-browser?query0=$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    sleep 1
     echo
 
     echo -e "${GREEN}5. Query Executed:${RESET} ${YELLOW}sum(rate(kube_pod_container_status_restarts_total{pod=~"oauth-openshift.*"}[5m]))${RESET}"
@@ -277,6 +345,8 @@ get_prometheus_graph_links() {
     query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~"oauth-openshift.*"%7D%5B5m%5D%29%29"
     query_url="$console_url/monitoring/query-browser?query0=$query"
     echo -e "$query_url"
+    $OPEN "$query_url" &>/dev/null
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     echo
 
     echo -e "${RED}To get in touch with OCP engineering for this operator, join #forum-apiserver slack channel and ping @api-auth-apiserver-component-questions handle with queries.${RESET}"
@@ -285,6 +355,7 @@ get_prometheus_graph_links() {
 # Main function
 main() {
     login_via_backplane
+    os_default_browser
     get_basic_info
     check_authentication_operator
     check_operator_resources
