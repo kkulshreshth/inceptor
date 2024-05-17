@@ -12,7 +12,7 @@ Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for op
     - Verify the version by executing - "osdctl version"
 
 # How to get inceptor CLI binary?
-1. Navigate to https://github.com/kkulshreshth/inceptor/tree/main/inceptor-cli and download the inceptor binary file.
+1. Download the inceptor binary file from latest release https://github.com/kkulshreshth/inceptor/releases/.
 2. Place the binary in /usr/local/bin/ in your system.
 3. Verify using ```inceptor --version```
 
