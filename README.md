@@ -6,6 +6,10 @@ Inceptor is a comprehensive CLI tool designed to simplify troubleshooting for op
 # Prerequisite:
 - ocm backplane CLI
 - osdctl CLI
+  - How to install osdctl?
+    - Download osdctl package from https://github.com/openshift/osdctl/releases 
+    - Extract it and place the osdctl binary inside /usr/local/bin/
+    - Verify the version by executing - "osdctl version"
 
 # How to get inceptor CLI binary?
 1. Navigate to https://github.com/kkulshreshth/inceptor/tree/main/inceptor-cli and download the inceptor binary file.
