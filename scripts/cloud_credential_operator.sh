@@ -199,15 +199,14 @@ cco_search_kcs() {
   local api_url_pattern="https://api.access.redhat.com/support/search/kcs?fq=P_DATA&q=Q_DATA&rows=3&start=0"
 
   inc_separator
-  echo -e "${YEL}Building search string${RESET}"
   echo
+  echo -e "${YEL}Searching for KCS Solutions...${NC}"
     
   if [[ ${#search_strings[@]} -eq 0 ]]; then
 
     echo -e "${GRN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to cloud-credential pods${NC}"
     return 1
   fi
-  echo -e "${YEL}Searching for KCS Solutions...${NC}"
   for issue in "${!search_strings[@]}"; do
     issue="${issue##*:}"
     compiled_search="$search_header $issue"
