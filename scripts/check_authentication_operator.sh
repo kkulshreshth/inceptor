@@ -333,7 +333,7 @@ get_prometheus_graph_links() {
 
     echo -e "${GREEN}4. Query Executed:${RESET} ${YELLOW}sum(rate(kube_pod_container_status_restarts_total{pod=~"authentication-operator.*"}[5m]))${RESET}"
     echo -e "This Prometheus query calculates the sum of the per-second rates of pod restarts for ${GREEN}authentication-operator pod${RESET} over the last 5 minutes. It gives you an indication of how frequently containers within authentication operator pods are restarting,"
-    query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~"authentication-operator.*"%7D%5B5m%5D%29%29"
+    query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~\"authentication-operator.*\"%7D%5B5m%5D%29%29"
     query_url="$console_url/monitoring/query-browser?query0=$query"
     echo -e "$query_url"
     $OPEN "$query_url" &>/dev/null
@@ -342,7 +342,7 @@ get_prometheus_graph_links() {
 
     echo -e "${GREEN}5. Query Executed:${RESET} ${YELLOW}sum(rate(kube_pod_container_status_restarts_total{pod=~"oauth-openshift.*"}[5m]))${RESET}"
     echo -e "This Prometheus query calculates the sum of the per-second rates of pod restarts for ${GREEN}oauth pods${RESET} over the last 5 minutes. It gives you an indication of how frequently containers within authentication operator pods are restarting,"
-    query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~"oauth-openshift.*"%7D%5B5m%5D%29%29"
+    query="sum%28rate%28kube_pod_container_status_restarts_total%7Bpod%3D~\"oauth-openshift.*\"%7D%5B5m%5D%29%29"
     query_url="$console_url/monitoring/query-browser?query0=$query"
     echo -e "$query_url"
     $OPEN "$query_url" &>/dev/null
