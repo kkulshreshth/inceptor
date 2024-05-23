@@ -209,6 +209,11 @@ check_ingress_cluster_operator_events(){
     oc get events -n openshift-ingress-operator
 
     echo
+
+    # Echo a separator line in green color for visual distinction
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
 }
 
 # Function to gather all Ingress related Pod Logs
@@ -284,14 +289,41 @@ check_ingress_cluster_operator_pod_logs() {
 
 
 # Function to check other configurations related to ingess
-check_other_ingress_cluster_operator_configuration() {
+check_ingress_controller_status() {
     # Echo a blank line for spacing
-    echo "I am check_other_ingress_cluster_operator_configuration()"
+    echo
     # Echo a separator line in green color for visual distinction
     #echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
     #echo
 
-    # check for pruning jobs as well
+    ics=$(oc get ingresscontroller -n openshift-ingress-operator --no-headers -o custom-columns=":metadata.name")
+
+    # Split the output into an array using newline as delimiter
+    IFS=$'\n' read -r -d '' -a ics_array <<<"$ics"
+
+    if [ -n "$ics_array" ]; then
+
+        for ic in "${ics_array[@]}"; do
+            # Echo the name of the Ingress Controllers
+            echo -e "${GREEN}INGRESS CONTROLLER NAME: $ic${RESET}"
+            echo
+
+            # Provide information about the '.status.conditions' section and its significance
+            echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+
+            # Pipe the output to 'awk' to filter and print the relevant '.status.conditions' section
+            oc describe ingresscontroller $ic -n openshift-ingress-operator | awk '/^\s*Conditions:/, /^\s*Extension:/{if(/^\s*Extension:/) exit; print}'
+
+            # Echo a separator line in green color for visual distinction
+            echo
+            echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+            echo
+
+        done
+
+    else
+        echo "No Ingress Controllers found."
+    fi
 
 }
 
@@ -313,16 +345,16 @@ get_prometheus_graph_links() {
 # Main function
 main() {
 
-    # Call functions to perform login, gather basic information, and check operator status
+    os_default_browser
     login_via_backplane
     get_basic_info
     check_ingress_cluster_operator_status
 
     # Check operator resources, events, operator pod logs and other configurations
     check_ingress_cluster_operator_resources
+    check_ingress_cluster_operator_events
     check_ingress_cluster_operator_pod_logs
-    error_highlights_from_ingress_cluster_operator_pod_logs
-    check_other_ingress_cluster_operator_configuration
+    check_ingress_controller_status
 
     # Build KCS search string, search for KCS solutions, get Prometheus graph links
     build_kcs_search_string
