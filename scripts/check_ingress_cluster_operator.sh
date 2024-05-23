@@ -37,6 +37,18 @@ echo
 # ===============================================================================================
 # =============================== FUNCTION Definition Start ====================================
 
+# Capturing OS default browser -- which will be used when prometheus links function executes
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
 
 # Define a function named 'login_via_backplane'
 login_via_backplane() {
@@ -68,13 +80,12 @@ get_basic_info() {
     # Echo a separator line in green color for visual distinction
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
 
-    # Echo a message indicating the start of listing service logs in yellow color
     echo
 
     echo -e "${YELLOW}Listing the service logs sent in past 30 days...${RESET}"
 
     # Use 'osdctl servicelog list' command to list service logs for the provided 'cluster_id'
-    osdctl servicelog list $cluster_id
+    osdctl -S servicelog list $cluster_id
 
     # Echo a blank line for spacing
     echo
@@ -85,12 +96,9 @@ get_basic_info() {
     # Echo a message indicating the start of checking node status in yellow color
     echo
 
-    echo -e "${YELLOW}Checking node status...${RESET}"
+    echo -e "${YELLOW}Checking cluster version, node and all cluster operator status...${RESET}"
+    oc get clusterversion; echo; echo; oc get nodes; echo; echo; oc get co
 
-    # Use 'oc get nodes' command to check the status of nodes in the cluster
-    oc get nodes
-
-    # Echo a blank line for spacing
     echo
 
     # Echo a separator line in green color for visual distinction
@@ -106,8 +114,6 @@ check_ingress_cluster_operator_status() {
 
     # Use 'oc get co ingress' command to get the status of the Ingress Cluster Operator
     oc get co ingress
-
-    # Echo a blank line for spacing
     echo
 
     # Provide information about the '.status.conditions' section and its significance
@@ -133,7 +139,7 @@ check_ingress_cluster_operator_resources() {
     echo
 
     # Echo a message indicating the start of checking deployment and pods for ingress in yellow color
-    echo -e "${YELLOW}Checking the deployment and pods for ingress...${RESET}"
+    echo -e "${YELLOW}Checking the deployment and pods in openshift-ingress namespace...${RESET}"
 
     # Echo a message indicating the start of deployment section in green color
     echo -e "${GREEN}DEPLOYMENT:${RESET}"
@@ -141,7 +147,6 @@ check_ingress_cluster_operator_resources() {
     # Use 'oc' command to get deployments in the namespace 'openshift-ingress'
     oc -n openshift-ingress get deployments
 
-    # Echo a blank line for spacing
     echo
     echo
 
@@ -157,6 +162,34 @@ check_ingress_cluster_operator_resources() {
     # Echo a blank line for spacing
     echo
 
+    # Echo a message indicating the start of checking deployment and pods for ingress in yellow color
+    echo -e "${YELLOW}Checking the deployment and pods in openshift-ingress-operator namespace...${RESET}"
+
+    # Echo a message indicating the start of deployment section in green color
+    echo -e "${GREEN}DEPLOYMENT:${RESET}"
+
+    # Use 'oc' command to get deployments in the namespace 'openshift-ingress'
+    oc -n openshift-ingress-operator get deployments
+
+    echo
+    echo
+
+    # Echo a message indicating the start of pods section in green color
+    echo -e "${GREEN}PODS:${RESET}"
+
+    # Use 'oc' command to get pods in the namespace 'openshift-ingress'
+    oc -n openshift-ingress-operator get pods
+
+    # Echo a separator line in green color for visual distinction
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+}
+
+
+# Function to check the namespace events for ingress
+check_ingress_cluster_operator_events(){
+
     # Echo a message indicating the start of listing events from namespace 'openshift-ingess' in yellow color
     echo -e "${YELLOW}Listing events from namespace/openshift-ingess${RESET}"
 
@@ -165,30 +198,72 @@ check_ingress_cluster_operator_resources() {
 
     # Echo a separator line in green color for visual distinction
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-}
 
-# Function to gather Ingress Cluster Operator Pod Logs
-check_ingress_cluster_operator_pod_logs() {
-    # Echo a blank line for spacing
+    echo
     echo
 
-    # Echo a message indicating the start of gathering Ingress Cluster Operator Pod Logs in yellow color
-    echo -e "${YELLOW}Gathering Ingress Operator Pod Logs...${RESET}"
+    # Echo a message indicating the start of listing events from namespace 'openshift-ingess' in yellow color
+    echo -e "${YELLOW}Listing events from namespace/openshift-ingess-operator .. ${RESET}"
 
-    # Get the name of the Ingress Cluster Operator pod
-    operator_pod=$(oc -n openshift-ingress get pods --no-headers -o custom-columns=":metadata.name")
+    # Use 'oc get events' command to get events in namespace 'openshift-ingess'
+    oc get events -n openshift-ingress-operator
+
+    echo
+}
+
+# Function to gather all Ingress related Pod Logs
+check_ingress_cluster_operator_pod_logs() {
+
+    echo
+
+    # Echo a message indicating the start of gathering Ingress Pod Logs in yellow color
+    echo -e "${YELLOW}Gathering openshift-ingress Pod Logs...${RESET}"
+
+    # Get the name of the openshift-ingress pod
+    oi_pod=$(oc -n openshift-ingress get pods --no-headers -o custom-columns=":metadata.name")
 
     # Define red flags indicating potential issues in logs
-    red_flags=("error" "degraded" "timeout" "expire" "canceled" "RequestError" "Unavailable" "backoff" "failed" "x509")
+    red_flags=("issue" "error" "degraded" "timeout" "expire" "not responding" "overload" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "not created" "conflict" "bottleneck" "congestion" "drop" "spike" "imbalance" "misconfiguration")
 
-    # Check if the operator pod exists
-    if [ -n "$operator_pod" ]; then
+    # Check if the pods exist
+    if [ -n "$oi_pod" ]; then
         # Echo the name of the operator pod
-        echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
+        echo -e "${GREEN}OPERATOR POD NAME: $oi_pod${RESET}"
         echo
 
         # Get the last 10 lines of logs from the operator pod and filter them for red flags
-        log_output=$(oc --tail 10 logs -n openshift-ingress "$operator_pod" | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|ImagePrunerDegraded|RequestError|x509')
+        log_output=$(oc --tail 10 logs -n openshift-ingress "$oi_pod" | grep -iE 'issue|error|degraded|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|bottleneck|congestion|drop|spike|imbalance|misconfiguration')
+
+        # Colorize the logs containing red flags
+        colored_logs="$log_output"
+        for word in "${red_flags[@]}"; do
+            colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+        done
+
+        # Print the colorized logs
+        echo -e "$colored_logs"
+    else
+        # Echo a message if no operator pod is found
+        echo "No Ingress pods found."
+    fi
+
+    echo
+    echo
+
+    # Echo a message indicating the start of gathering Ingress Cluster Operator Pod Logs in yellow color
+    echo -e "${YELLOW}Gathering openshift-ingress-operator Pod Logs...${RESET}"
+
+    # Get the name of the openshift-ingress-operator pod
+    oio_pod=$(oc -n openshift-ingress-operator get pods --no-headers -o custom-columns=":metadata.name")
+
+    # Check if the pods exist
+    if [ -n "$oio_pod" ]; then
+        # Echo the name of the operator pod
+        echo -e "${GREEN}OPERATOR POD NAME: $oio_pod${RESET}"
+        echo
+
+        # Get the last 10 lines of logs from the operator pod and filter them for red flags
+        log_output=$(oc --tail 10 logs -n openshift-ingress "$oio_pod" | grep -iE 'issue|error|degraded|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|bottleneck|congestion|drop|spike|imbalance|misconfiguration')
 
         # Colorize the logs containing red flags
         colored_logs="$log_output"
@@ -207,37 +282,6 @@ check_ingress_cluster_operator_pod_logs() {
     echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
 }
 
-# Function to gather logs from ingess pods and check for red flags
-error_highlights_from_ingress_cluster_operator_pod_logs() {
-    # Echo a blank line for spacing
-    echo
-
-    # Echo a message indicating the start of gathering logs from ingess pods in yellow color
-    echo -e "${YELLOW}Gathering logs from one of the ingess pods...${RESET}"
-
-    # Define red flags indicating potential issues in logs
-    red_flags=("error" "degraded" "timeout" "expire" "canceled" "ImagePrunerDegraded" "RequestError" "Unavailable" "backoff" "failed" "x509")
-
-    # Echo the name of the operator pod
-    echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
-    echo
-
-    # Get the last 10 lines of logs from the 'ingress' deployment and filter them for red flags
-    log_output=$(oc --tail 10 -n openshift-ingress logs deployment/image-registry | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|ImagePrunerDegraded|RequestError|x509')
-
-    # Colorize the logs containing red flags
-    colored_logs="$log_output"
-    for word in "${red_flags[@]}"; do
-        colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
-    done
-
-    # Print the colorized logs
-    echo -e "$colored_logs"
-
-    # Echo a separator line in green color for visual distinction
-    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
-    echo
-}
 
 # Function to check other configurations related to ingess
 check_other_ingress_cluster_operator_configuration() {
