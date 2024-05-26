@@ -31,20 +31,7 @@ echo
 # ===============================================================================================
 # =============================== FUNCTION Definition Start ====================================
 
-# Capturing OS default browser -- which will be used when prometheus links function executes
-os_default_browser() {
-  case $(uname | tr '[:upper:]' '[:lower:]') in
-  linux*)
-    OPEN="xdg-open"
-    ;;
-  darwin*)
-    OPEN="open"
-    ;;
-  esac
-}
-
-
-# Define a function named 'login_via_backplane'
+# Define a function named to check if logged in / if not; do login.
 check_login() {
 
     read -p "Have you already connected via VPN and logged in into the cluster ? (y/n) " logged_in
@@ -53,7 +40,7 @@ check_login() {
         echo "Awesome! thanks for your confirmation"
     else
         # Echo a message indicating the start of the login process in yellow color
-        echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
+        echo -e "${YELLOW}Let me login into the cluster for you ... ${RESET}"
         echo
 
         # Prompt the user to enter their username
@@ -66,11 +53,11 @@ check_login() {
         echo -n "Enter your password: "
         read -s pass
 
-
+        echo; echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
         # Use 'ocm backplane login' command to log into the cluster using the provided 'cluster_id'
         ocm backplane login $cluster_id
         echo
-        oc get nodes
+
     fi
 }
 
@@ -432,32 +419,27 @@ get_kcs() {
     fi
 }
 
-# Function to generate and display Prometheus graph links related to ingress operator metrics
-get_prometheus_graph_links() {
-    # echo "I will give you Prometheus graph links()"
-    echo "For further concerns you can reach out to the SRE or cloud or regional channel.."
+# Function to display any additional information
+other_info() {
+    echo "For further concerns you can reach out to the SRE or cloudy or regional channel.."
 
 }
 
 # Main function
 main() {
 
-    #os_default_browser
-    check_login
+    #check_login
     #get_basic_info
     #check_ingress_cluster_operator_status
-
-    # Check operator resources, events, operator pod logs and other configurations
     #check_ingress_cluster_operator_resources
     #check_ingress_cluster_operator_events
+
     #check_ingress_cluster_operator_pod_logs
     #check_ingress_controller_status
 
-    # Build KCS search string, search for KCS solutions, get Prometheus graph links
+    # Build KCS search string, search for KCS solutions and some other info.
     #get_kcs
-    #search_kcs
-    #get_prometheus_graph_links
-    echo "main function completed"
+    #other_info
 
 }
 
