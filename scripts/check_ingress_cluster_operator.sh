@@ -16,6 +16,10 @@ cluster_id=$1
 
 # Initialize a search string for Knowledge Center Search
 search_string="ingress+controller+%2B+operator+%2B+openshift"
+# #- q=ingress+controller+%2B+openshift+in+"access.redhat.com%2Fsolutions"
+# - q=ingress+controller+%2B+openshift+in+"access.redhat.com%2Farticles"
+# - q=ingress+controller+%2B+operator+%2B+openshift+in+"access.redhat.com%2Fsolutions"
+# - q=ingress+controller+%2B+operator+%2B+openshift+in+"access.redhat.com%2Farticles"
 
 # Set a flag to indicate whether to perform Knowledge Center Search
 do_kcs_search="true"
@@ -41,24 +45,33 @@ os_default_browser() {
 
 
 # Define a function named 'login_via_backplane'
-login_via_backplane() {
-    # Echo a message indicating the start of the login process in yellow color
-    echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
-    echo
+check_login() {
 
-    # Prompt the user to enter their username
-    # Read the input from the user and store it in the variable 'username'
-    echo -n "Enter your username (ex: rhn-support-<kerberos>): "
-    read username
+    read -p "Have you already connected via VPN and logged in into the cluster ? (y/n) " logged_in
+    if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
+        echo
+        echo "Awesome! thanks for your confirmation"
+    else
+        # Echo a message indicating the start of the login process in yellow color
+        echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
+        echo
 
-    # Prompt the user to enter their password (with the '-s' flag to silence input)
-    # Read the input from the user without echoing it to the terminal (for password input)
-    echo -n "Enter your password: "
-    read -s pass
+        # Prompt the user to enter their username
+        # Read the input from the user and store it in the variable 'username'
+        echo -n "Enter your username (ex: rhn-support-<kerberos>): "
+        read username
+
+        # Prompt the user to enter their password (with the '-s' flag to silence input)
+        # Read the input from the user without echoing it to the terminal (for password input)
+        echo -n "Enter your password: "
+        read -s pass
 
 
-    # Use 'ocm backplane login' command to log into the cluster using the provided 'cluster_id'
-    #ocm backplane login $cluster_id
+        # Use 'ocm backplane login' command to log into the cluster using the provided 'cluster_id'
+        ocm backplane login $cluster_id
+        echo
+        oc get nodes
+    fi
 }
 
 # Define a function named 'get_basic_info'
@@ -340,7 +353,7 @@ get_kcs() {
         do_kcs_search="false"
     else
         # Strings to search for
-        search_pattern=("IngressControllerUnavailable" "issue" "error" "degrade" "timeout" "expire" "not responding" "overload" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "not created" "conflict" "misconfiguration")
+        search_pattern=("IngressControllerUnavailable" "SyncLoadBalancerFailed" "issue" "error" "degrade" "timeout" "expire" "not responding" "overload" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "not created" "conflict" "misconfiguration")
 
         # Variable to store the found strings
         found_strings=""
@@ -380,14 +393,27 @@ get_kcs() {
 
 	    # Make the API call and store the response in a variable
 
-        KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+        if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
 
-        if [ -z "$KCS" ]; then
-            KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+            KCS=$(curl -s -X GET "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+
+            if [ -z "$KCS" ]; then
+                KCS=$(curl -s -X GET "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+            else
+                # KCS is not empty
+                # good to proceed
+                echo
+            fi
         else
-            # KCS is not empty
-            # good to proceed
+            KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+
+            if [ -z "$KCS" ]; then
+                KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+            else
+                # KCS is not empty
+                # good to proceed
             echo
+            fi
         fi
 
         # Check if the API call was successful (HTTP status code 200)
@@ -408,14 +434,16 @@ get_kcs() {
 
 # Function to generate and display Prometheus graph links related to ingress operator metrics
 get_prometheus_graph_links() {
-    echo "I will give you Prometheus graph links()"
+    # echo "I will give you Prometheus graph links()"
+    echo "For further concerns you can reach out to the SRE or cloud or regional channel.."
+
 }
 
 # Main function
 main() {
 
     #os_default_browser
-    #login_via_backplane
+    check_login
     #get_basic_info
     #check_ingress_cluster_operator_status
 
@@ -426,9 +454,10 @@ main() {
     #check_ingress_controller_status
 
     # Build KCS search string, search for KCS solutions, get Prometheus graph links
-    get_kcs
+    #get_kcs
     #search_kcs
-    get_prometheus_graph_links
+    #get_prometheus_graph_links
+    echo "main function completed"
 
 }
 
