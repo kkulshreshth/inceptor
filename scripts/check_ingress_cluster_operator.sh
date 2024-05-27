@@ -5,10 +5,10 @@
 clear
 
 # Set color codes for formatting terminal output
-RED="\033[31m"
-GREEN="\033[32m"
-YELLOW="\033[33m"
-BLUE="\033[44m"
+RED="\033[1;31m"
+GREEN="\033[1;32m"
+YELLOW="\033[1;33m"
+BLUE="\033[1;44m"
 RESET="\033[0m"
 
 # Assign the first command-line argument to the variable 'cluster_id'
@@ -23,6 +23,9 @@ search_string="ingress+controller+%2B+operator+%2B+openshift"
 
 # Set a flag to indicate whether to perform Knowledge Center Search
 do_kcs_search="true"
+
+# declaring a global variable to capture if user is logged in or not
+logged_in=""
 
 echo
 echo
@@ -52,6 +55,7 @@ check_login() {
         echo -n "Enter your password: "
         read -s pass
 
+        echo
         echo
         echo -e "${YELLOW}Logging into the cluster via backplane...${RESET}"
 
@@ -355,7 +359,7 @@ get_kcs() {
 
     if [ "$do_kcs_search" == "false" ]; then
 
-        echo -e "${GREEN}We couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources manually."
+        echo -e "${GREEN}We couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources manually.${RESET}"
 
         # page1=https://access.redhat.com/solutions?title=ingress&product=91541&category=All&state=published&kcs_state=All&language=en&field_internal_tags_tid=All
 
@@ -416,7 +420,12 @@ other_info() {
     echo
     echo "Thank you for trying our service, hope to serve you the best!"
     echo
-    ocm backplane logout &> /dev/null
+    if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
+        echo
+    else
+        ocm backplane logout &> /dev/null
+    fi
+
 }
 
 # Main function
