@@ -226,7 +226,7 @@ check_ingress_cluster_operator_pod_logs() {
             echo
 
             # Get the last 10 lines of logs from the operator pod and filter them for red flags
-            log_output=$(oc --tail 20 logs -n openshift-ingress "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|bottleneck|congestion|drop|spike|imbalance|misconfiguration')
+            log_output=$(oc --tail 20 logs -n openshift-ingress "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|congestion|misconfigur')
 
             # Colorize the logs containing red flags
             colored_logs="$log_output"
@@ -262,7 +262,7 @@ check_ingress_cluster_operator_pod_logs() {
             echo
 
             # Get the last 10 lines of logs from the operator pod and filter them for red flags
-            log_output=$(oc --tail 10 logs -n openshift-ingress-operator "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|bottleneck|congestion|drop|spike|imbalance|misconfiguration')
+            log_output=$(oc --tail 10 logs -n openshift-ingress-operator "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|congestion|misconfigur')
 
             # Colorize the logs containing red flags
             colored_logs="$log_output"
@@ -333,7 +333,7 @@ get_kcs() {
         do_kcs_search="false"
     else
         # Strings to search for
-        search_pattern=("IngressControllerUnavailable" "SyncLoadBalancerFailed" "issue" "error" "degrade" "timeout" "expire" "not responding" "overload" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "not created" "conflict" "misconfiguration")
+        search_pattern=("IngressControllerUnavailable" "SyncLoadBalancerFailed" "issue" "error" "degrade" "timeout" "expire" "not responding" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "misconfigur")
 
         # Variable to store the found strings
         found_strings=""
