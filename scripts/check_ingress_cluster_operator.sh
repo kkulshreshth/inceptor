@@ -24,28 +24,14 @@ search_string="ingress+controller+%2B+operator+%2B+openshift"
 # Set a flag to indicate whether to perform Knowledge Center Search
 do_kcs_search="true"
 
-# declaring a global variable to capture if user is logged in or not
-logged_in=""
-
 echo
 echo
 
 # ===============================================================================================
 # =============================== FUNCTION Definition Start ====================================
 
-# Define a function named to check if logged in / if not; do login.
-check_login() {
-
-    read -p "Have you already connected via VPN and logged in into the cluster ? (y/n) " logged_in
-    if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
-        echo
-        echo "Awesome! thanks for your confirmation"
-    else
-        echo
-        echo -e "${YELLOW}Let me login into the cluster for you ... ${RESET}"
-        echo
-
-        # Prompt the user to enter their username
+# Define a function to login.
+do_login() {
         # Read the input from the user and store it in the variable 'username'
         echo -n "Enter your username (ex: rhn-support-<kerberos>): "
         read username
@@ -62,8 +48,6 @@ check_login() {
         # Use 'ocm backplane login' command to log into the cluster using the provided 'cluster_id'
         ocm backplane login $cluster_id
         echo
-
-    fi
 }
 
 # Define a function named 'get_basic_info'
@@ -226,7 +210,7 @@ check_ingress_cluster_operator_pod_logs() {
             echo
 
             # Get the last 10 lines of logs from the operator pod and filter them for red flags
-            log_output=$(oc --tail 20 logs -n openshift-ingress "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|congestion|misconfigur')
+            log_output=$(oc --tail 20 logs -n openshift-ingress "$pod" | grep -iE 'issue|error|degrade|timeout|expire|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|not created|conflict|congestion|misconfigur')
 
             # Colorize the logs containing red flags
             colored_logs="$log_output"
@@ -262,7 +246,7 @@ check_ingress_cluster_operator_pod_logs() {
             echo
 
             # Get the last 10 lines of logs from the operator pod and filter them for red flags
-            log_output=$(oc --tail 10 logs -n openshift-ingress-operator "$pod" | grep -iE 'issue|error|degrade|timeout|expire|not responding|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|connection error|reconciliation failed|not created|conflict|congestion|misconfigur')
+            log_output=$(oc --tail 10 logs -n openshift-ingress-operator "$pod" | grep -iE 'issue|error|degrade|timeout|expire|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|not created|conflict|congestion|misconfigur')
 
             # Colorize the logs containing red flags
             colored_logs="$log_output"
@@ -373,28 +357,14 @@ get_kcs() {
         api_url_secondary="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
 
 	    # Make the API call and store the response in a variable
+        KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
 
-        if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
-
-            KCS=$(curl -s -X GET "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
-
-            if [ -z "$KCS" ]; then
-                KCS=$(curl -s -X GET "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
-            else
-                # KCS is not empty
-                # good to proceed
-                echo
-            fi
+        if [ -z "$KCS" ]; then
+           KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
         else
-            KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
-
-            if [ -z "$KCS" ]; then
-                KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
-            else
-                # KCS is not empty
-                # good to proceed
+            # KCS is not empty
+            # good to proceed
             echo
-            fi
         fi
 
         # Check if the API call was successful (HTTP status code 200)
@@ -420,19 +390,14 @@ other_info() {
     echo
     echo "Thank you for trying our service, hope to serve you the best!"
     echo
-    if [[ "$logged_in" == y* || "$logged_in" == Y* ]]; then
-        echo
-    else
-        ocm backplane logout &> /dev/null
-    fi
-
+    ocm backplane logout &> /dev/null
 }
 
 # Main function
 main() {
 
     # perform cluster login, basic checks.
-    check_login
+    do_login
     get_basic_info
 
     # start looking into ingress things
