@@ -40,10 +40,6 @@ def summarize_case_data(case_data):
       - [Bullet points: Evaluate and state the business impact of the issue.]
     - **Expectations**:
       - [Bullet points: Clearly outline the next steps and the expected timing for the next contact.]
-    ### ENVIRONMENT:
-    - [Bullet points: Mention any relevant environmental factors that could be influencing the case.]
-    ### NOTES:
-    - [Bullet points: Provide additional relevant information or suggestions that could aid in further understanding or resolving the case.]
     """
     prompt = PromptTemplate.from_template(prompt_template)
     #llm = ChatOllama(model="llama3", temperature=0)
