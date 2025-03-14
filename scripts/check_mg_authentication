@@ -1,0 +1,282 @@
+#!/bin/bash
+
+set -e
+
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[44m"
+RESET="\033[0m"
+cluster_id="${args[clusterid]:-$1}"
+search_string="authentication%20operator%20degraded%20in%20OpenShift"
+do_kcs_search="true"
+keyword_counter=0
+
+echo "Enter your username (ex: rhn-support-<kerberos>):"
+read username
+
+echo "Enter your password:"
+read -s pass
+
+
+function check_dependencies() {
+    local missing_dependencies=()
+
+    if ! command -v omc &> /dev/null; then
+        missing_dependencies+=("omc")
+    fi
+
+    if ! command -v zenity &> /dev/null; then
+        missing_dependencies+=("zenity")
+    fi
+
+    if [ ${#missing_dependencies[@]} -eq 0 ]; then
+        return 0
+    else
+        echo -e "The following dependencies are missing:"
+        for dep in "${missing_dependencies[@]}"; do
+            # Using ANSI color codes for red text
+            echo -e "\033[31m- $dep\033[0m"
+        done
+        exit 1
+    fi
+}
+
+function welcome_message() {
+    if zenity --question --text="Welcome to Inceptor - must-gather Analyzer =) \n Would you like to analyze a must-gather/inspect file? "
+    then
+        return 0
+    else
+        echo "User chose not to proceed."
+        exit 1
+    fi
+}
+
+function select_mg() {
+
+    omc mg delete -a
+
+    path_must_gather=$(zenity --file-selection --title="Select the must-gather/inspect file you want to analyze." --directory)
+    if [ -z "$path_must_gather" ]
+    then
+        echo "Error: No must-gather/inspect file file selected." >&2
+        exit 1
+    fi
+    echo $path_must_gather
+}
+
+
+login_via_omc() {
+    echo -e "${YELLOW}Open must-gather using omc(download from here if you not have such tool)...${RESET}"
+    echo $path_must_gather
+    omc use $path_must_gather
+}
+
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
+# Function to get basic info about the cluster
+get_basic_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking node status...${RESET}"
+    omc get nodes
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+
+# Function to check the status of the Authentication Operator
+check_authentication_operator() {
+    echo
+    echo -e "${YELLOW}Checking Authentication Operator Status...${RESET}"
+    omc get co/authentication
+    echo
+    echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    omc get co authentication -o yaml | awk '/^\s*conditions:/, /^\s*Extension:/{if(/^\s*extension:/) exit; print}'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+# Checking the deployment and pods for image-registry
+check_operator_resources() {
+    echo
+    echo -e "${YELLOW}Checking the deployment and pods for authentication operator...${RESET}"
+    echo -e "${GREEN}DEPLOYMENTS:${RESET}"
+    omc -n openshift-authentication-operator get deployments
+    omc -n openshift-authentication get deployments
+    echo
+    echo
+    echo -e "${GREEN}PODS:${RESET}"
+    omc -n openshift-authentication-operator  get pod
+    omc -n openshift-authentication get pod
+    echo
+}
+
+
+# Function to gather Authentication Operator logs.
+get_authentication_operator_logs() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Gathering Authentication Operator Pod Logs...${RESET}"
+    operator_pod=$(omc get pods -n openshift-authentication-operator -o=jsonpath='{.items[0].metadata.name}')
+    
+    red_flags=("error" "degraded" "timeout" "expire" "canceled" "OAuthServerRouteEndpointAccessibleController" "OAuthServerServiceEndpointAccessibleController reconciliation failed" "IngressStateController reconciliation failed")
+
+    if [ -n "$operator_pod" ]; then
+        echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
+        echo
+        log_output=$(omc logs -n openshift-authentication-operator "$operator_pod"  | tail -n25 )
+
+        colored_logs="$log_output"
+        for word in "${red_flags[@]}"; do
+            colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+        done
+
+        # Print the colored logs
+        echo -e "$colored_logs"
+    else
+        echo "No Authentication Operator pod found."
+    fi
+}
+
+# Build keyword search string for searching KCS solutions:
+build_search_string() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo -e "${YELLOW}Building search string${RESET}"
+    echo
+    operator_degraded_message=$(omc get co authentication -o json | jq -r '.status.conditions[] | select(.type == "Degraded" and .status == "True") | .message')
+    if [ -z "$operator_degraded_message" ]; then
+        operator_degraded_message=$(omc get co authentication -o json | jq -r '.status.conditions[] | select(.type == "Progressing" and .status == "True") | .message')
+    fi
+
+    #echo -e "OPERTOR MESSAGE : $operator_degraded_message"
+
+    if [ -z "$operator_degraded_message" ]; then
+        do_kcs_search="false"
+    else
+        # Strings to search for
+        search_pattern=("OAuthServerConfigObservationDegraded: failed to apply IDP" "OAuthServerRouteEndpointAccessibleControllerDegraded" "ProxyConfigControllerDegraded" "APIServerDeploymentDegraded" "OAuthServerConfigObservationDegraded: error validating configMap" "ngressStateEndpointsDegraded: No endpoints found for oauth-server" "RouteStatusDegraded: route is not available")
+
+        # Variable to store the found strings
+        found_strings=""
+
+        # Loop through each search string
+        for search_str in "${search_pattern[@]}"; do
+            # Check if the search string is present in the paragraph
+            if [[ $operator_degraded_message =~ $search_str ]]; then
+                # If found, append it to the variable
+                found_strings="$found_strings $search_str"
+                keyword_counter=$keyword_counter + 1
+            fi
+        done
+
+        if [ "$keyword_counter" -eq 0 ]; then
+            # If keyword_counter is  equal to 0, send the original message as found string
+            found_strings="$operator_degraded_message"
+        fi
+
+        # Print the result
+        #echo "Found strings: $found_strings"
+
+        updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
+        search_string="$search_string%20$updated_operator_degraded_message"
+        #echo "NEW SEARCH STRINGS: $search_string"
+    fi
+}
+
+# Search KCS solutions dynamically using hydra API:
+search_kcs() {
+    echo
+    if [ "$do_kcs_search" == "false" ]; then
+        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to oauth pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/articles/5900841#operator${RESET}"
+    else
+        echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
+        api_url="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
+	
+	    # Make the API call and store the response in a variable
+        api_response=$(curl -s -X GET -u "$username:$pass" "$api_url")
+
+        # Check if the API call was successful (HTTP status code 200)
+        http_status_code=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
+
+        if [ "$http_status_code" -eq 200 ]; then
+            echo "API call was successful."
+            echo "API Response:"
+            echo "$api_response" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//'
+        else
+            echo "API call failed with HTTP status code $http_status_code."
+        fi
+    fi
+}
+
+# Function to gather OAuth server logs
+get_oauth_server_logs() {
+    echo
+    echo -e "${YELLOW}Checking OAuth Pod Status...${RESET}"
+    echo 
+    echo -e "${GREEN}omc get pods -n openshift-authentication${RESET}"
+    omc get pods -n openshift-authentication
+    echo
+    echo -e "${YELLOW}Gathering OAuth Server Logs...${RESET}"
+    oauth_pod=$(omc get pods -n openshift-authentication -o=jsonpath='{.items[?(@.metadata.labels.app=="oauth-openshift")].metadata.name}')
+    
+    if [ -n "$oauth_pod" ]; then
+        pod1=$(omc get pod -n openshift-authentication | awk 'NR==2{print $1}')
+        echo
+        echo -e "${GREEN}Capturing logs from pod/$pod1${RESET}"
+        omc  logs $pod1 -n openshift-authentication| tail -n10
+        
+        pod2=$(omc get pod -n openshift-authentication | awk 'NR==3{print $1}')
+        echo
+        echo -e "${GREEN}Capturing logs from pod/$pod2${RESET}"
+        omc  logs $pod2 -n openshift-authentication| tail -n10 
+        
+        pod3=$(omc get pod -n openshift-authentication | awk 'NR==4{print $1}')
+        echo
+        echo -e "${GREEN}Capturing logs from pod/$pod3${RESET}"
+        omc  logs $pod3 -n openshift-authentication| tail -n10
+        echo
+    else
+        echo "No OAuth Server pod found."
+    fi
+}
+
+
+gather_route_data(){
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo -e "${YELLOW}Gathering data for route...${RESET}"
+    echo
+    echo -e "${GREEN}omc get route -n openshift-authentication${RESET}"
+    omc get route -n openshift-authentication
+    echo
+}
+
+
+# Main function
+main() {
+    check_dependencies
+    welcome_message
+    path_must_gather=$(select_mg)
+    login_via_omc
+    get_basic_info
+    check_authentication_operator
+    check_operator_resources
+    get_authentication_operator_logs
+    get_oauth_server_logs
+    gather_route_data
+    build_search_string
+    search_kcs
+}
+
+main
