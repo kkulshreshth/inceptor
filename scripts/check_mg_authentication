@@ -177,7 +177,7 @@ build_search_string() {
             if [[ $operator_degraded_message =~ $search_str ]]; then
                 # If found, append it to the variable
                 found_strings="$found_strings $search_str"
-                keyword_counter=$keyword_counter + 1
+                keyword_counter=`expr $keyword_counter + 1`
             fi
         done
 
@@ -187,11 +187,10 @@ build_search_string() {
         fi
 
         # Print the result
-        #echo "Found strings: $found_strings"
+        echo "Found strings: $found_strings"
 
         updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
-        search_string="$search_string%20$updated_operator_degraded_message"
-        #echo "NEW SEARCH STRINGS: $search_string"
+        search_string=$updated_operator_degraded_message
     fi
 }
 
