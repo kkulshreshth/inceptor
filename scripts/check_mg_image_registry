@@ -1,0 +1,305 @@
+#!/bin/bash
+
+set -e
+
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[44m"
+RESET="\033[0m"
+cluster_id="${args[clusterid]:-$1}"
+search_string="authentication%20operator%20degraded%20in%20OpenShift"
+do_kcs_search="true"
+keyword_counter=0
+
+echo "Enter your username (ex: rhn-support-<kerberos>):"
+read username
+
+echo "Enter your password:"
+read -s pass
+
+
+function check_dependencies() {
+    local missing_dependencies=()
+
+    if ! command -v omc &> /dev/null; then
+        missing_dependencies+=("omc")
+    fi
+
+    if ! command -v zenity &> /dev/null; then
+        missing_dependencies+=("zenity")
+    fi
+
+    if [ ${#missing_dependencies[@]} -eq 0 ]; then
+        return 0
+    else
+        echo -e "The following dependencies are missing:"
+        for dep in "${missing_dependencies[@]}"; do
+            # Using ANSI color codes for red text
+            echo -e "\033[31m- $dep\033[0m"
+        done
+        exit 1
+    fi
+}
+
+function welcome_message() {
+    if zenity --question --text="Welcome to Inceptor - must-gather Analyzer =) \n Would you like to analyze a must-gather/inspect file? "
+    then
+        return 0
+    else
+        echo "User chose not to proceed."
+        exit 1
+    fi
+}
+
+function select_mg() {
+
+    omc mg delete -a
+
+    path_must_gather=$(zenity --file-selection --title="Select the must-gather/inspect file you want to analyze." --directory)
+    if [ -z "$path_must_gather" ]
+    then
+        echo "Error: No must-gather/inspect file file selected." >&2
+        exit 1
+    fi
+    echo $path_must_gather
+}
+
+
+login_via_omc() {
+    echo -e "${YELLOW}Open must-gather using omc(download from here if you not have such tool)...${RESET}"
+    echo $path_must_gather
+    omc use $path_must_gather
+}
+
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
+get_basic_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking node status...${RESET}"
+    omc get nodes
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+# Function to check the status of the Image Registry Operator
+check_image_registry_operator_status() {
+    echo
+    echo -e "${YELLOW}Checking Image Registry Operator Status...${RESET}"
+    omc get co/image-registry
+    echo
+    echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    omc get co image-registry -o yaml | awk '/^\s*conditions:/, /^\s*Extension:/{if(/^\s*extension:/) exit; print}'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+# Checking the deployment and pods for image-registry
+check_operator_resources() {
+    echo
+    echo -e "${YELLOW}Checking the deployment and pods for image-registry...${RESET}"
+    echo -e "${GREEN}DEPLOYMENT:${RESET}"
+    omc -n openshift-image-registry get deployments
+    echo
+    echo
+    echo -e "${GREEN}PODS:${RESET}"
+    omc -n openshift-image-registry get pod
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+check_image_registry_operator_pod_logs() {
+    echo
+    echo -e "${YELLOW}Gathering Image Registry Operator Pod Logs...${RESET}"
+    operator_pod=$(omc -n openshift-image-registry get pods --no-headers -o custom-columns=":metadata.name" | grep cluster-image-registry-operator)
+    red_flags=("error" "degraded" "timeout" "expire" "canceled" "ImagePrunerDegraded" "RequestError" "Unavailable" "backoff" "failed" "x509")
+
+    if [ -n "$operator_pod" ]; then
+        echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
+        echo
+        log_output=$(omc logs -n openshift-image-registry "$operator_pod"  | tail -n25 )
+        colored_logs="$log_output"
+        for word in "${red_flags[@]}"; do
+            colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+        done
+
+        # Print the colored logs
+        echo -e "$colored_logs"
+    else
+        echo "No Image Registry Operator pod found."
+    fi
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+# Checking logs of image-registry pods
+check_image_registry_pod_logs() {
+
+    echo
+    echo -e "${YELLOW}Checking image_registry Pod Status...${RESET}"
+    echo 
+    echo -e "${GREEN}omc get pods -n openshift-image-registry${RESET}"
+    omc get pods -n openshift-image-registry
+
+    echo -e "${YELLOW}Gathering image-reistry Server Logs...${RESET}"
+    image_registry_pod=$(omc get pods -n openshift-image-registry -o=jsonpath='{.items[?(@.metadata.labels.docker-registry like "default")].metadata.name}')
+    
+    if [ -n "$image_registry_pod" ]; then
+        echo
+        echo -e "${GREEN}Capturing logs from pod/$image_registry_pod${RESET}"
+        omc  logs $image_registry_pod -n openshift-image-registry| tail -n10
+        echo
+    else
+        echo "No image_registry pod found."
+    fi
+
+}
+
+check_other_configuration() {
+    echo
+    echo -e "${YELLOW}Listing events from namespace/openshift-image-registry${RESET}"
+    omc get events -n openshift-image-registry
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking the config for image-registry${RESET}"
+    echo -e "${GREEN}omc get configs.imageregistry.operator.openshift.io cluster -o json | jq -r '.status.conditions' ${RESET}"
+    echo
+    omc get configs.imageregistry.operator.openshift.io cluster -o yaml | awk '/^\s*conditions:/, /^\s*generations:/{if(/^\s*generations:/) exit; print}'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+
+    echo -e "${YELLOW}Fetching storage configuration${RESET}"
+    echo -e "${GREEN}omc get configs.imageregistry.operator.openshift.io cluster -o json | jq -r '.spec.storage'${RESET}"
+    echo
+    omc get configs.imageregistry.operator.openshift.io cluster -o json | jq -r '.spec.storage'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+    echo -e "${YELLOW}Check imagepruner (.status.conditions)${RESET}"
+    echo -e "${GREEN}omc get imagepruner cluster -o yaml (.status.conditions)${RESET}"
+    omc get imagepruner cluster -o yaml | awk '/^\s*conditions:/, /^\s*observedGeneration:/{if(/^\s*observedGeneration:/) exit; print}'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+job_pruning_issues() {
+    echo -e "${BLUE}KNOWN ISSUES and SOLUTIONS${RESET}"
+    echo -e "${YELLOW}PRUNING JOB FAILURES${RESET}"
+    echo
+    echo -e "A common cause of the cluster operator to become degraded is through the failure of its periodic pruning jobs."
+    
+    echo -e "${GREEN}Check for any jobs which did not complete, they will show up as '0/1' in the completions column${RESET}"
+    omc get job -n openshift-image-registry
+    echo
+    echo -e "If any job did not complete, check the logs for the pod corresponding to the job for more information about the failure using the following command:"
+    echo -e "${GREEN}omc logs -n openshift-image-registry -l job-name=$JOBNAME${RESET}"
+    echo
+    echo -e "If successive pruning jobs have completed, ask the SRE/customer to remove the failed jobs using the following command:"
+    echo -e "${GREEN}oc delete job -n openshift-image-registry $JOBNAME${RESET}"
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+print_additional_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Additional Information:${RESET}"
+    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}forum-imageregistry${RESET} slack channel and ping ${GREEN}@imageregistry-team${RESET} handle with any queries."
+}
+
+build_search_string() {
+    echo -e "${YELLOW}Building search string${RESET}"
+    echo
+    operator_degraded_message=$(omc get co image-registry -o json | jq -r '.status.conditions[] | select(.type == "Degraded" and .status == "True") | .message')
+    if [ -z "$operator_degraded_message" ]; then
+        operator_degraded_message=$(omc get co image-registry -o json | jq -r '.status.conditions[] | select(.type == "Progressing" and .status == "True") | .message')
+    fi
+
+    #echo -e "OPERTOR MESSAGE : $operator_degraded_message"
+
+    if [ -z "$operator_degraded_message" ]; then
+        do_kcs_search="false"
+    else
+        # Strings to search for
+        search_pattern=("Progressing: Unable to apply resources: unable to sync storage configuration: RequestError: send request failed" "ImagePrunerDegraded: Job has reached the specified backoff limit" "Degraded: The deployment does not have available replicas" "unsupported protocol scheme")
+
+        # Variable to store the found strings
+        found_strings=""
+
+        # Loop through each search string
+        for search_str in "${search_pattern[@]}"; do
+            # Check if the search string is present in the paragraph
+            if [[ $operator_degraded_message =~ $search_str ]]; then
+                # If found, append it to the variable
+                found_strings="$found_strings $search_str"
+                keyword_counter=`expr $keyword_counter + 1`
+            fi
+        done
+
+        if [ "$keyword_counter" -eq 0 ]; then
+            # If keyword_counter is  equal to 0, send the original message as found string
+            found_strings="$operator_degraded_message"
+        fi
+
+        # Print the result
+        #echo "Found strings: $found_strings"
+
+        updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
+        search_string=$updated_operator_degraded_message
+        #echo "NEW SEARCH STRINGS: $search_string"
+    fi
+}
+
+search_kcs() {
+    echo
+    if [ "$do_kcs_search" == "false" ]; then
+        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to image-regitry pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/3804741${RESET}"
+    else
+        echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
+        api_url="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
+	
+	      # Make the API call and store the response in a variable
+        api_response=$(curl -s -X GET -u "$username:$pass" "$api_url")
+
+        # Check if the API call was successful (HTTP status code 200)
+        http_status_code=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
+
+        if [ "$http_status_code" -eq 200 ]; then
+            echo "API call was successful."
+            echo "API Response:"
+            echo "$api_response" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//'
+        else
+            echo "API call failed with HTTP status code $http_status_code."
+        fi
+    fi
+}
+
+
+main() {
+    check_dependencies
+    welcome_message
+    path_must_gather=$(select_mg)
+    login_via_omc
+    get_basic_info
+    check_image_registry_operator_status
+    check_operator_resources
+    check_image_registry_operator_pod_logs
+    check_image_registry_pod_logs
+    check_other_configuration
+    job_pruning_issues
+    build_search_string
+    search_kcs
+    print_additional_info
+}
+
+main
