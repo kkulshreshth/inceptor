@@ -1,0 +1,419 @@
+#!/bin/bash
+
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[44m"
+RESET="\033[0m"
+cluster_id="${args[clusterid]:-$1}"
+search_string="ingress%20operator%20degraded%20in%20OpenShift"
+do_kcs_search="true"
+keyword_counter=0
+
+echo "Enter your username (ex: rhn-support-<kerberos>):"
+read username
+
+echo "Enter your password:"
+read -s pass
+
+
+function check_dependencies() {
+    local missing_dependencies=()
+
+    if ! command -v omc &> /dev/null; then
+        missing_dependencies+=("omc")
+    fi
+
+    if ! command -v zenity &> /dev/null; then
+        missing_dependencies+=("zenity")
+    fi
+
+    if [ ${#missing_dependencies[@]} -eq 0 ]; then
+        return 0
+    else
+        echo -e "The following dependencies are missing:"
+        for dep in "${missing_dependencies[@]}"; do
+            # Using ANSI color codes for red text
+            echo -e "\033[31m- $dep\033[0m"
+        done
+        exit 1
+    fi
+}
+
+function welcome_message() {
+    if zenity --question --text="Welcome to Inceptor - must-gather Analyzer =) \n Would you like to analyze a must-gather/inspect file? "
+    then
+        return 0
+    else
+        echo "User chose not to proceed."
+        exit 1
+    fi
+}
+
+function select_mg() {
+
+    omc mg delete -a
+
+    path_must_gather=$(zenity --file-selection --title="Select the must-gather/inspect file you want to analyze." --directory)
+    if [ -z "$path_must_gather" ]
+    then
+        echo "Error: No must-gather/inspect file file selected." >&2
+        exit 1
+    fi
+    echo $path_must_gather
+}
+
+
+login_via_omc() {
+    echo -e "${YELLOW}Open must-gather using omc(download from here if you not have such tool)...${RESET}"
+    echo $path_must_gather
+    omc use $path_must_gather
+}
+
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
+get_basic_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking node status...${RESET}"
+    omc get nodes
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+# Function to check ingress cluster operator status.
+check_ingress_cluster_operator_status() {
+    echo
+
+    echo -e "${YELLOW}Checking Ingress Operator Status...${RESET}"
+
+    # Use 'oc get co ingress' command to get the status of the Ingress Cluster Operator
+    echo
+    omc get co ingress
+    echo
+
+    # Provide information about the '.status.conditions' section and its significance
+    echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+
+    # Use 'oc describe co ingress' command to get detailed information about the Ingress Cluster Operator
+    # Pipe the output to 'awk' to filter and print the relevant '.status.conditions' section
+    omc get co ingress -o yaml | awk '/^\s*conditions:/, /^\s*Extension:/{if(/^\s*extension:/) exit; print}'
+
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+}
+
+# Function to check the deployment and pods for ingress
+check_ingress_cluster_operator_resources() {
+
+    echo -e "${YELLOW}Checking the deployment and pods in openshift-ingress namespace...${RESET}"
+    echo
+
+    echo -e "${GREEN}DEPLOYMENT:${RESET}"
+
+    # Use 'oc' command to get deployments in the namespace 'openshift-ingress'
+    omc -n openshift-ingress get deployments
+
+    echo
+    echo
+
+    echo -e "${GREEN}PODS:${RESET}"
+
+    # Use 'oc' command to get pods in the namespace 'openshift-ingress'
+    omc -n openshift-ingress get pods
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+
+    echo -e "${YELLOW}Checking the deployment and pods in openshift-ingress-operator namespace...${RESET}"
+    echo
+
+    echo -e "${GREEN}DEPLOYMENT:${RESET}"
+
+    # Use 'oc' command to get deployments in the namespace 'openshift-ingress'
+    omc -n openshift-ingress-operator get deployments
+
+    echo
+    echo
+
+    echo -e "${GREEN}PODS:${RESET}"
+
+    # Use 'oc' command to get pods in the namespace 'openshift-ingress'
+    omc -n openshift-ingress-operator get pods
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+}
+
+
+# Function to check the namespace events for ingress
+check_ingress_cluster_operator_events(){
+
+    echo -e "${YELLOW}Listing events from namespace/openshift-ingess${RESET}"
+    echo
+
+    # Use 'oc get events' command to get events in namespace 'openshift-ingess'
+    omc get events -n openshift-ingress
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    echo
+    echo
+
+    echo -e "${YELLOW}Listing events from namespace/openshift-ingess-operator .. ${RESET}"
+
+    echo
+
+    # Use 'oc get events' command to get events in namespace 'openshift-ingess'
+    omc get events -n openshift-ingress-operator
+
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+# Function to gather all Ingress related Pod Logs
+check_ingress_cluster_operator_pod_logs() {
+
+    echo
+
+    echo -e "${YELLOW}Gathering openshift-ingress Pod Logs...${RESET}"
+    echo
+
+    # Get the name of the openshift-ingress pod
+    oi_pod=$(omc -n openshift-ingress get pods --no-headers -o custom-columns=":metadata.name")
+
+    # Define red flags indicating potential issues in logs
+    red_flags=("issue" "error" "degrade" "timeout" "expire" "not responding" "overload" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "not created" "conflict" "bottleneck" "congestion" "drop" "spike" "imbalance" "misconfiguration")
+
+    # Check if the pods exist
+    if [ -n "$oi_pod" ]; then
+
+        for pod in $oi_pod; do
+            # Echo the name of the operator pod
+            echo
+            echo -e "${GREEN}INGRESS POD NAME: $pod${RESET}"
+            echo
+
+            # Get the last 10 lines of logs from the operator pod and filter them for red flags
+            log_output=$(omc  logs "$pod" -n openshift-ingress | grep -iE 'issue|error|degrade|timeout|expire|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|not created|conflict|congestion|misconfigur|template' | tail -n20)
+                        
+            # Colorize the logs containing red flags
+            colored_logs="$log_output"
+            for word in "${red_flags[@]}"; do
+                colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+            done
+
+            # Print the colorized logs
+            echo -e "$colored_logs"
+        done
+    else
+        # Echo a message if no operator pod is found
+        echo "No Ingress pods found."
+    fi
+
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+
+    echo -e "${YELLOW}Gathering openshift-ingress-operator Pod Logs...${RESET}"
+    echo
+
+    # Get the name of the openshift-ingress-operator pod
+    oio_pod=$(omc -n openshift-ingress-operator get pods --no-headers -o custom-columns=":metadata.name")
+
+    # Check if the pods exist
+    if [ -n "$oio_pod" ]; then
+
+        for pod in $oio_pod; do
+            # Echo the name of the operator pod
+            echo
+            echo -e "${GREEN}INGRESS OPERATOR POD NAME: $pod${RESET}"
+            echo
+
+            # Get the last 10 lines of logs from the operator pod and filter them for red flags
+            log_output=$(omc  logs "$pod" -n openshift-ingress-operator | grep -iE 'issue|error|degrade|timeout|expire|overload|canceled|RequestError|Unavailable|backoff|failed|unreachable|x509|not created|conflict|congestion|misconfigur|template' | tail -n20)
+
+            # Colorize the logs containing red flags
+            colored_logs="$log_output"
+            for word in "${red_flags[@]}"; do
+                colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+            done
+
+            # Print the colorized logs
+            echo -e "$colored_logs"
+        done
+    else
+        # Echo a message if no operator pod is found
+        echo "No Ingress Operator pod found."
+    fi
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+
+# Function to check other configurations related to ingess
+check_ingress_controller_status() {
+    echo
+
+    ics=$(omc get ingresscontroller -n openshift-ingress-operator --no-headers -o custom-columns=":metadata.name")
+
+    # Split the output into an array using newline as delimiter
+    IFS=$'\n' read -r -d '' -a ics_array <<<"$ics"
+
+    if [ -n "$ics_array" ]; then
+
+        for ic in "${ics_array[@]}"; do
+            # Echo the name of the Ingress Controllers
+            echo -e "${GREEN}INGRESS CONTROLLER NAME: $ic${RESET}"
+            echo
+
+            # Provide information about the '.status.conditions' section and its significance
+            echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+
+            # Pipe the output to 'awk' to filter and print the relevant '.status.conditions' section
+            omc get ingresscontroller $ic -n openshift-ingress-operator -o yaml | awk '/^\s*conditions:/, /^\s*Extension:/{if(/^\s*extension:/) exit; print}'
+            echo
+            echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+            echo
+
+        done
+
+    else
+        echo "No Ingress Controllers found."
+    fi
+
+}
+
+# Function to build search string and find KCS based on operator degraded message
+
+get_kcs() {
+
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+
+    operator_degraded_message=$(omc get co ingress -o json | jq -r '.status.conditions[] | select(.type == "Degraded" and .status == "True") | .message')
+    if [ -z "$operator_degraded_message" ]; then
+        operator_degraded_message=$(oc get co ingress -o json | jq -r '.status.conditions[] | select(.type == "Progressing" and .status == "True") | .message')
+    fi
+
+    #echo -e "OPERTOR MESSAGE : $operator_degraded_message"
+
+    if [ -z "$operator_degraded_message" ]; then
+        do_kcs_search="false"
+    else
+        # Strings to search for
+        search_pattern=("IngressControllerUnavailable" "SyncLoadBalancerFailed" "issue" "error" "degrade" "timeout" "expire" "not responding" "canceled" "RequestError" "Unavailable" "backoff" "failed" "unreachable" "x509" "connection error" "reconciliation failed" "misconfigur")
+
+        # Variable to store the found strings
+        found_strings=""
+
+        # Loop through each search string
+        for search_str in "${search_pattern[@]}"; do
+            # Check if the search string is present in the paragraph
+            if [[ $operator_degraded_message =~ $search_str ]]; then
+                # If found, append it to the variable
+                found_strings="$found_strings $search_str"
+            fi
+        done
+
+
+        updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
+        updated_search_string="$search_string$updated_operator_degraded_message"
+
+    fi
+
+    echo
+
+    disclaimer="Content retrieved via this service may not fully address your specific concerns. Please verify information manually before implementing any suggestions. As we are in the development phase, your understanding is appreciated. Thank you."
+
+    if [ "$do_kcs_search" == "false" ]; then
+
+        echo -e "${GREEN}We couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources manually.${RESET}"
+
+        # page1=https://access.redhat.com/solutions?title=ingress&product=91541&category=All&state=published&kcs_state=All&language=en&field_internal_tags_tid=All
+
+        # page2=https://access.redhat.com/articles?title=ingress&kcs_article_type=All&product=91541&category=All&language=en&order=state&sort=desc
+
+    else
+        echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
+
+        api_url_primary="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$updated_search_string*&rows=3&start=0"
+
+        api_url_secondary="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
+
+	    # Make the API call and store the response in a variable
+        KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_primary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+
+        if [ -z "$KCS" ]; then
+           KCS=$(curl -s -X GET -u "$username:$pass" "$api_url_secondary" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//')
+        else
+            # KCS is not empty
+            # good to proceed
+            echo
+        fi
+
+        # Check if the API call was successful (HTTP status code 200)
+        http_status_codep=$(curl -s -o /dev/null -w "%{http_code}" "$api_url_primary")
+        http_status_codes=$(curl -s -o /dev/null -w "%{http_code}" "$api_url_secondary")
+
+        if [ "$http_status_codep" -eq 200 ] || [ "$http_status_codes" -eq 200 ] ; then
+            echo "Heya! we found some KCS for you : "
+            echo $KCS | sed 's/ /\n/g'
+            echo
+            echo $disclaimer
+            echo
+        else
+            echo "We apologise, the API request for 'KCS Search' has been failed with HTTP status code $http_status_code."
+        fi
+    fi
+}
+
+
+
+# Main function
+main() {
+
+    check_dependencies
+    welcome_message
+    path_must_gather=$(select_mg)
+    login_via_omc
+    get_basic_info
+
+    # start looking into ingress things
+    check_ingress_cluster_operator_status
+    check_ingress_cluster_operator_resources
+    check_ingress_cluster_operator_events
+
+    # dig deep into ingress
+    check_ingress_cluster_operator_pod_logs
+    check_ingress_controller_status
+
+    # Build KCS search string, search for KCS solutions and some other info + log out from cluster.
+    get_kcs
+
+}
+
+# =============================== FUNCTION Definition END ====================================
+
+# ================================ MAIN FUNCTION Invoke ======================================
+
+
+# Call the main function to start the program execution
+main
