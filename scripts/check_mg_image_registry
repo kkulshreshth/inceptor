@@ -1,6 +1,5 @@
 #!/bin/bash
 
-set -e
 
 RED="\033[31m"
 GREEN="\033[32m"
@@ -8,7 +7,7 @@ YELLOW="\033[33m"
 BLUE="\033[44m"
 RESET="\033[0m"
 cluster_id="${args[clusterid]:-$1}"
-search_string="authentication%20operator%20degraded%20in%20OpenShift"
+search_string="image%20regsitry%20operator%20degraded%20in%20OpenShift"
 do_kcs_search="true"
 keyword_counter=0
 
