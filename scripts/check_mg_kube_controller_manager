@@ -1,0 +1,264 @@
+#!/bin/bash
+
+RED="\033[31m"
+GREEN="\033[32m"
+YELLOW="\033[33m"
+BLUE="\033[44m"
+RESET="\033[0m"
+cluster_id="${args[clusterid]:-$1}"
+search_string="autoscaler%20operator%20degraded%20in%20OpenShift"
+do_kcs_search="true"
+keyword_counter=0
+
+echo "Enter your username (ex: rhn-support-<kerberos>):"
+read username
+
+echo "Enter your password:"
+read -s pass
+
+
+function check_dependencies() {
+    local missing_dependencies=()
+
+    if ! command -v omc &> /dev/null; then
+        missing_dependencies+=("omc")
+    fi
+
+    if ! command -v zenity &> /dev/null; then
+        missing_dependencies+=("zenity")
+    fi
+
+    if [ ${#missing_dependencies[@]} -eq 0 ]; then
+        return 0
+    else
+        echo -e "The following dependencies are missing:"
+        for dep in "${missing_dependencies[@]}"; do
+            # Using ANSI color codes for red text
+            echo -e "\033[31m- $dep\033[0m"
+        done
+        exit 1
+    fi
+}
+
+function welcome_message() {
+    if zenity --question --text="Welcome to Inceptor - must-gather Analyzer =) \n Would you like to analyze a must-gather/inspect file? "
+    then
+        return 0
+    else
+        echo "User chose not to proceed."
+        exit 1
+    fi
+}
+
+function select_mg() {
+
+    omc mg delete -a
+
+    path_must_gather=$(zenity --file-selection --title="Select the must-gather/inspect file you want to analyze." --directory)
+    if [ -z "$path_must_gather" ]
+    then
+        echo "Error: No must-gather/inspect file file selected." >&2
+        exit 1
+    fi
+    echo $path_must_gather
+}
+
+
+login_via_omc() {
+    echo -e "${YELLOW}Open must-gather using omc(download from here if you not have such tool)...${RESET}"
+    echo $path_must_gather
+    omc use $path_must_gather
+}
+
+# For default browsers when prom links function executed ---
+os_default_browser() {
+  case $(uname | tr '[:upper:]' '[:lower:]') in
+  linux*)
+    OPEN="xdg-open"
+    ;;
+  darwin*)
+    OPEN="open"
+    ;;
+  esac
+}
+
+get_basic_info() {
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking node status...${RESET}"
+    omc get nodes
+    echo
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+# Function to check the status of the kube-controller-manager Operator
+check_kube_controller_manager_operator_status() {
+    echo
+    echo -e "${YELLOW}Checking kube-controller-manager Operator Status...${RESET}"
+    omc get co kube-controller-manager 
+    echo
+    echo -e "The below ${GREEN}'.status.conditions'${RESET} section provides insights into the overall health and operational state of the Operator."
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    omc get co kube-controller-manager -o yaml | awk '/^\s*conditions:/, /^\s*Extension:/{if(/^\s*extension:/) exit; print}'
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+# Checking the deployment and pods for kube-controller-manager
+check_operator_resources() {
+    echo
+    echo -e "${YELLOW}Checking the resource for kube-controller-manager...${RESET}"
+    echo -e "${GREEN}GET ALL:${RESET}"
+    omc -n openshift-kube-controller-manager get all
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+check_kube_controller_manager_operator_pod_logs() {
+    echo
+    echo -e "${YELLOW}Gathering kube-controller-manager Operator Pod Logs...${RESET}"
+    operator_pod=$(omc -n openshift-kube-controller-manager-operator get pods --no-headers -o custom-columns=":metadata.name" | grep kube-controller-manager-operator)
+    red_flags=("error" "degraded" "timeout" "Terminating" "canceled" "CrashLoopBackOff" "RequestError" "Unavailable" "backoff" "failed" "x509")
+
+    if [ -n "$operator_pod" ]; then
+        echo -e "${GREEN}OPERATOR POD NAME: $operator_pod${RESET}"
+        echo
+        log_output=$(omc logs "$operator_pod" -n openshift-kube-controller-manager-operator | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|CrashLoopBackOff|RequestError|x509' | tail -10)
+        colored_logs="$log_output"
+        for word in "${red_flags[@]}"; do
+            colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+        done
+
+        # Print the colored logs
+        echo -e "$colored_logs"
+    else
+        echo "No kube-controller-manager_operator_pod found."
+    fi
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+}
+
+# Checking logs of openshift-kube-controller-manager  pods
+check_openshift_kube_controller_manager_pod_logs() {
+    echo
+    echo -e "${YELLOW}Gathering logs from openshift-kube-controller-manager related pods...${RESET}"
+    
+    red_flags=("error" "degraded" "timeout" "Terminating" "canceled" "CrashLoopBackOff" "RequestError" "Unavailable" "backoff" "failed" "x509")
+    echo
+    log_output=$(for i in $(omc get pods -o name -n openshift-kube-controller-manager) ; do omc logs $i -n openshift-kube-controller-manager -c kube-controller-manager | grep -E 'error|failed|degraded|timeout|expire|canceled|Unavailable|backoff|CrashLoopBackOff|RequestError|x509' | tail -10 ; done)
+    colored_logs="$log_output"
+    for word in "${red_flags[@]}"; do
+        colored_logs=$(echo -e "${colored_logs//$word/\\033[31m$word\\033[0m}")
+    done
+
+    # Print the colored logs
+    echo -e "$colored_logs"
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+
+
+check_other_configuration() {
+    echo
+    echo -e "${YELLOW}Listing events from namespace/openshift-kube-controller-manager${RESET}"
+    omc get events -n openshift-kube-controller-manager
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking describe for openshift-kube-controller-manager${RESET}"
+    omc get kubecontrollermanager/cluster -o json | jq -r '.status.conditions[]' 
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+    echo -e "${YELLOW}Checking MCP status ${RESET}"
+    omc get mcp
+    echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    echo
+}
+
+
+
+print_additional_info() {
+    echo -e "${YELLOW}Additional Information:${RESET}"
+    echo -e "To get in touch with OCP engineering for this operator, join ${GREEN}forum-ocp-workloads${RESET} to handle with any queries."
+}
+
+build_search_string() {
+    echo
+    operator_degraded_message=$(omc get co kube-controller-manager -o json | jq -r '.status.conditions[] | select(.type == "Degraded") | .message')
+    if [ "$operator_degraded_message" == "null" ]; then
+        operator_degraded_message=$(omc get co kube-controller-manager -o json | jq -r '.status.conditions[] | select(.type == "Progressing") | .message')
+    fi
+
+   # echo -e "OPERTOR MESSAGE : $operator_degraded_message"
+
+    if [ "$operator_degraded_message" == "null" ]; then
+        do_kcs_search="false"
+    else
+        # Strings to search for KCS, will add more strings based on defined errors
+        search_pattern=("kube-controller-manager pods" "kube-controller-manager is in state degraded" "kube-controller-manager degraded" "kube-controller-manager CrashLoopBackOff")
+
+        # Variable to store the found strings
+        found_strings=""
+
+        # Loop through each search string
+        for search_str in "${search_pattern[@]}"; do
+            # Check if the search string is present in the paragraph
+           # echo "search str: $search_str"
+          #  if [[ $operator_degraded_message =~ $search_str ]]; then
+          #      # If found, append it to the variable
+                found_strings="$found_strings $search_str"
+          #  fi
+        done
+
+        # Print the result
+       # echo "Found strings: $found_strings"
+
+        updated_operator_degraded_message=$(echo "$found_strings" | sed 's/ /%20/g')
+        search_string="$search_string%20$updated_operator_degraded_message"
+      #  echo "NEW SEARCH STRINGS: $search_string"
+        echo -e "${GREEN}------------------------------------------------------------------------${RESET}"
+    fi
+}
+
+search_kcs() {
+    echo
+    if [ "$do_kcs_search" == "false" ]; then
+        echo -e "${GREEN}Couldn't build a valid search string. It looks like the operator is not being reported as degraded. If there are issues with the operator, please review the logs and resources related to openshift-kube-controller-manager pods. You can also refer the following KCS for further troubleshooting:${RESET}${RED} https://access.redhat.com/solutions/3804741${RESET}"
+    else
+        echo -e "${YELLOW}Searching for KCS Solutions...${RESET}"
+        api_url="https://api.access.redhat.com/support/search/kcs?fq=documentKind:(%22Solution%22)&q=*$search_string*&rows=3&start=0"
+	
+	      # Make the API call and store the response in a variable
+        api_response=$(curl -s -X GET -u "$username:$pass" "$api_url")
+
+        # Check if the API call was successful (HTTP status code 200)
+        http_status_code=$(curl -s -o /dev/null -w "%{http_code}" "$api_url")
+
+        if [ "$http_status_code" -eq 200 ]; then
+            echo "API call was successful."
+            echo "API Response:"
+            echo "$api_response" | grep -o 'https://access.redhat.com/solutions/[^ ]*' | sed -e 's/["}].*//'
+            echo "this KCS also might help  https://access.redhat.com/solutions/7059756"
+        else
+            echo "API call failed with HTTP status code $http_status_code."
+        fi
+    fi
+}
+
+
+main() {
+    check_dependencies
+    welcome_message
+    path_must_gather=$(select_mg)
+    login_via_omc
+    get_basic_info
+    check_kube_controller_manager_operator_status
+    check_operator_resources
+    check_kube_controller_manager_operator_pod_logs
+    check_openshift_kube_controller_manager_pod_logs
+    check_other_configuration
+    build_search_string
+    search_kcs
+    print_additional_info
+}
+
+main
